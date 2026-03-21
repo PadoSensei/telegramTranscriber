@@ -1,0 +1,5 @@
+python-telegram-bot
+openai-whisper
+google-generativeai
+python-dotenv
+httpx
