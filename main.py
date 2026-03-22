@@ -85,40 +85,49 @@ def restricted(func):
 def parse_vault_request(text):
     """
     Identifies #2ndBrain and sorts into project folders.
-    Returns (should_sync, project_name, error_msg)
+    Supports case-insensitive hashtags and folder casing preservation.
+    Returns (should_sync: bool, project_name: str, warning: str)
     """
     if not text:
         return False, None, None
     
-    # 1. Extract all hashtags
+    # 1. Extract all hashtags using regex
     tags = re.findall(r"#(\w+)", text)
     
-    # 2. Check for #2ndBrain (case-insensitive)
-    has_sync_tag = any(t.lower() == "2ndbrain" for t in tags)
+    # Check for keywords as well (for native voice note transcription)
+    text_lower = text.lower()
+    has_sync_intent = any(t.lower() == "2ndbrain" for t in tags) or "second brain" in text_lower
     
-    if not has_sync_tag:
-        return False, None, None
+    if not has_sync_intent:
+        return False, None, None # SILENT: No hashtags/keywords found
 
-    # 3. Match against known projects
+    # 2. Match against known projects
     known_projects = ["Feena", "AISolutions", "Zil"]
     found_project = None
     
-    for t in tags: # 't' is our loop variable
-        # We search the known_projects list for a case-insensitive match to 't'
+    # Look for a hashtag or word that matches a project name (case-insensitive)
+    for t in tags:
         match = next((p for p in known_projects if p.lower() == t.lower()), None)
         if match:
-            found_project = match # This will be the correctly cased name from known_projects
+            found_project = match
             break
-    
-    # 4. Return logic
+            
+    if not found_project:
+        # Check raw text for project names if no hashtags were used (Voice Note case)
+        for project in known_projects:
+            if project.lower() in text_lower:
+                found_project = project
+                break
+
+    # 3. Return logic
     if found_project:
         return True, found_project, None
     else:
-        # User had #2ndBrain but no valid project tag
+        # Intent found, but project missing or misspelled
         other_tags = [t for t in tags if t.lower() != "2ndbrain"]
         if other_tags:
             return True, "00_Inbox", f"⚠️ Project `#{other_tags[0]}` not recognized. Using `00_Inbox`."
-        return True, "00_Inbox", "💡 Tip: Add a project tag (e.g. `#Feena`) to sort this note."
+        return True, "00_Inbox", "💡 *Tip:* Mention a project (e.g. `#Feena`) to sort this note."
 
 async def send_large_message(context, chat_id, text, parse_mode="Markdown"):
     """Splits long AI responses to avoid Telegram message limits."""
@@ -199,25 +208,23 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Analyze this transcript for {user_name}'s Second Brain:\n"
             f"1. **Summary**: High-level overview.\n"
             f"2. **Action Items**: Bulleted list of tasks.\n"
-            f"3. **Keywords**: 5 tags.\n\n"
+            f"3. **Research/Further Thought**: Topics to explore deeper.\n"
+            f"4. **Keywords**: 5 tags.\n\n"
             f"IMPORTANT: Use ** for bold.\n\nTRANSCRIPT:\n{clean_transcript}"
         )
         analysis_output = await loop.run_in_executor(None, call_gemini, analysis_prompt)
         await send_large_message(context, chat_id, f"🧠 *Second Brain Analysis*\n\n{analysis_output}")
         
-        # E. OPTIONAL OBSIDIAN SYNC (Sprint 1 Feature)
-        # 1. Gather potential triggers (Check Caption, then check Transcript)
+        # E. OPTIONAL OBSIDIAN SYNC
+        # Gather potential triggers (Caption for forwards, Transcript for native voice notes)
         trigger_text = message.caption or clean_transcript
-        
         should_sync, project, warning = parse_vault_request(trigger_text)
 
         if should_sync and vault:
-            # If there's a warning (e.g. missing project), send it now
             if warning:
                 await context.bot.send_message(chat_id=chat_id, text=warning, parse_mode="Markdown")
 
             await status_msg.edit_text(f"🚀 *Syncing to Obsidian:* `{project}`...")
-            
             success = await loop.run_in_executor(
                 executor, 
                 vault.push_to_obsidian, 
@@ -225,11 +232,10 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 clean_transcript, 
                 analysis_output
             )
-            
             if success:
-                await context.bot.send_message(chat_id=chat_id, text=f"✅ Saved to `{project}`.")
+                await context.bot.send_message(chat_id=chat_id, text=f"✅ Saved to `{project}/TelegramCaptures`.")
             else:
-                await context.bot.send_message(chat_id=chat_id, text="⚠️ Vault sync failed.")
+                await context.bot.send_message(chat_id=chat_id, text="⚠️ Vault sync failed. Check server logs.")
 
         await status_msg.delete()
 
@@ -248,7 +254,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     print(f"💬 TEXT NOTE FROM {user_name.upper()}")
     
-    should_sync, project = parse_vault_request(text)
+    # FIXED: Unpack 3 values to prevent "too many values to unpack" error
+    should_sync, project, warning = parse_vault_request(text)
     
     prompt = f"Analyze this text note for a Second Brain. Extract key insights and action items: {text}"
     loop = asyncio.get_event_loop()
@@ -257,7 +264,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=chat_id, text=f"📝 *Note Captured*\n\n{response}", parse_mode="Markdown")
 
     if should_sync and vault:
-        # For text notes, we treat the 'clean_transcript' as the raw text
+        if warning:
+            await context.bot.send_message(chat_id=chat_id, text=warning, parse_mode="Markdown")
+            
+        # Treat the raw text as the 'clean_transcript' for text-only notes
         await loop.run_in_executor(executor, vault.push_to_obsidian, project, text, response)
         await context.bot.send_message(chat_id=chat_id, text=f"✅ Text synced to `{project}`.")
 
