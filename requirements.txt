@@ -3,6 +3,7 @@ openai-whisper
 google-generativeai
 python-dotenv
 httpx
+GitPython
 pytest
 pytest-asyncio
-gitpython
+pytest-mock

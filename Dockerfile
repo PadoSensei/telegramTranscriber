@@ -1,19 +1,20 @@
 # 1. Use an official Python image
 FROM python:3.11-slim
 
-# 2. Install system dependencies (ffmpeg is the important one)
+# 2. Install system dependencies (ffmpeg for Whisper, git for Obsidian Sync)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. Set the working directory inside the container
+# 3. Set the working directory
 WORKDIR /app
 
-# 4. Copy the requirements file and install Python libraries
+# 4. Copy requirements and install Python libraries
 COPY requirements.txt .
-RUN apt-get update && apt-get install -y ffmpeg git && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir -r requirements.txt
 
-# 5. Copy the rest of your code
+# 5. Copy the rest of the application code
 COPY . .
 
 # 6. Run the bot
