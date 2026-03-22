@@ -38,7 +38,7 @@ gemini = genai.GenerativeModel(MODEL_NAME)
 
 print(f"\n{'='*50}")
 print(f"🤖 SYSTEM STARTING AT {datetime.now().strftime('%H:%M:%S')}")
-print("--- 🌀 Loading Whisper 'turbo' on CPU ---")
+print("--- 🌀 Loading Whisper 'tiny' on CPU ---")
 start_load = time.time()
 model = whisper.load_model("tiny", device="cpu") 
 print(f"--- ✅ Whisper Loaded in {time.time() - start_load:.2f}s ---")
