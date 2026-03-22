@@ -1,4 +1,5 @@
 import os
+import re
 import asyncio
 import whisper
 import logging
@@ -14,8 +15,9 @@ from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filte
 from telegram.request import HTTPXRequest
 from telegram.error import BadRequest
 
-# Import the security allow-list
+# Project Modules
 from config import ALLOWED_IDS
+from vault_manager import VaultManager
 
 # --- 1. SETUP & CONFIG ---
 load_dotenv()
@@ -26,18 +28,32 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# API Keys
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
-    raise ValueError("❌ Missing API Keys in .env file!")
+# Git Config
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_REPO_URL = os.getenv("GITHUB_REPO_URL")
+GITHUB_USERNAME = os.getenv("GITHUB_USERNAME")
 
+if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
+    raise ValueError("❌ Missing core API Keys in .env file!")
+
+# Initialize AI
 genai.configure(api_key=GEMINI_API_KEY)
-MODEL_NAME = "gemini-2.0-flash" 
-gemini = genai.GenerativeModel(MODEL_NAME)
+gemini = genai.GenerativeModel("gemini-2.0-flash")
+
+# Initialize Vault Manager
+vault = None
+if all([GITHUB_TOKEN, GITHUB_REPO_URL, GITHUB_USERNAME]):
+    vault = VaultManager(GITHUB_REPO_URL, GITHUB_TOKEN, GITHUB_USERNAME)
+    logger.info("📦 Vault Manager initialized and ready for sync.")
+else:
+    logger.warning("⚠️ Git environment variables missing. Obsidian sync will be disabled.")
 
 print(f"\n{'='*50}")
-print(f"🤖 SYSTEM STARTING AT {datetime.now().strftime('%H:%M:%S')}")
+print(f"🧠 SECOND BRAIN SYSTEM STARTING AT {datetime.now().strftime('%H:%M:%S')}")
 print("--- 🌀 Loading Whisper 'tiny' on CPU ---")
 start_load = time.time()
 model = whisper.load_model("tiny", device="cpu") 
@@ -49,7 +65,7 @@ executor = ThreadPoolExecutor(max_workers=1)
 # --- 2. SECURITY LAYER ---
 
 def restricted(func):
-    """Decorator to only allow IDs in config.ALLOWED_IDS."""
+    """Decorator to only allow authorized IDs."""
     @wraps(func)
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         user_id = update.effective_user.id
@@ -66,14 +82,51 @@ def restricted(func):
 
 # --- 3. UTILITY FUNCTIONS ---
 
+def parse_vault_request(text):
+    """
+    Identifies #2ndBrain and sorts into project folders.
+    Returns (should_sync, project_name, error_msg)
+    """
+    if not text:
+        return False, None, None
+    
+    # 1. Extract all hashtags
+    tags = re.findall(r"#(\w+)", text)
+    
+    # 2. Check for #2ndBrain (case-insensitive)
+    has_sync_tag = any(t.lower() == "2ndbrain" for t in tags)
+    
+    if not has_sync_tag:
+        return False, None, None
+
+    # 3. Match against known projects
+    known_projects = ["Feena", "AISolutions", "Zil"]
+    found_project = None
+    
+    for t in tags: # 't' is our loop variable
+        # We search the known_projects list for a case-insensitive match to 't'
+        match = next((p for p in known_projects if p.lower() == t.lower()), None)
+        if match:
+            found_project = match # This will be the correctly cased name from known_projects
+            break
+    
+    # 4. Return logic
+    if found_project:
+        return True, found_project, None
+    else:
+        # User had #2ndBrain but no valid project tag
+        other_tags = [t for t in tags if t.lower() != "2ndbrain"]
+        if other_tags:
+            return True, "00_Inbox", f"⚠️ Project `#{other_tags[0]}` not recognized. Using `00_Inbox`."
+        return True, "00_Inbox", "💡 Tip: Add a project tag (e.g. `#Feena`) to sort this note."
+
 async def send_large_message(context, chat_id, text, parse_mode="Markdown"):
-    """Handles long text and protects against Telegram's fragile Markdown parser."""
+    """Splits long AI responses to avoid Telegram message limits."""
     parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
     for part in parts:
         try:
             await context.bot.send_message(chat_id=chat_id, text=part, parse_mode=parse_mode)
         except BadRequest:
-            logger.warning("Markdown failed, falling back to plain text.")
             await context.bot.send_message(chat_id=chat_id, text=part, parse_mode=None)
 
 def call_gemini(prompt):
@@ -99,7 +152,6 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_name = message.from_user.first_name
     
-    # Identify the file source (Voice, Audio, or Shared WhatsApp File)
     file_id = None
     file_label = "Audio"
 
@@ -116,10 +168,10 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file_label = "Shared Audio"
     
     if not file_id:
-        return # Not a file we can process
+        return 
 
-    print(f"\n📩 {file_label.upper()} FROM {user_name.upper()}")
-    status_msg = await context.bot.send_message(chat_id=chat_id, text=f"⏳ *{file_label} received.* Cranking the i5 engine...")
+    print(f"\n📩 {file_label.upper()} RECEIVED FROM {user_name.upper()}")
+    status_msg = await context.bot.send_message(chat_id=chat_id, text=f"⏳ *{file_label} received.* Processing...")
     temp_path = f"temp_{int(datetime.now().timestamp())}.oga"
 
     try:
@@ -128,11 +180,11 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await voice_file.download_to_drive(temp_path)
         
         # B. TRANSCRIBE
-        await status_msg.edit_text("⚙️ *Transcribing...* (Whisper Turbo is running)")
+        await status_msg.edit_text("⚙️ *Transcribing audio...*")
         loop = asyncio.get_event_loop()
         raw_transcript = await loop.run_in_executor(executor, transcribe_sync, temp_path)
 
-        # C. MESSAGE 1: CLEAN TRANSCRIPT
+        # C. CLEAN TRANSCRIPT
         await status_msg.edit_text("✍️ *Cleaning up transcript...*")
         transcript_prompt = (
             f"Clean up this raw transcript from {user_name}. Fix grammar and punctuation. "
@@ -141,19 +193,44 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clean_transcript = await loop.run_in_executor(None, call_gemini, transcript_prompt)
         await send_large_message(context, chat_id, f"📜 *Full Transcript*\n\n{clean_transcript}")
 
-        # D. MESSAGE 2: ANALYSIS
+        # D. ANALYSIS
         await status_msg.edit_text("🧠 *Analyzing for Second Brain...*")
         analysis_prompt = (
             f"Analyze this transcript for {user_name}'s Second Brain:\n"
             f"1. **Summary**: High-level overview.\n"
             f"2. **Action Items**: Bulleted list of tasks.\n"
-            f"3. **Research/Further Thought**: Topics to explore deeper.\n"
-            f"4. **Keywords**: 5 tags.\n\n"
-            f"IMPORTANT: No underscores. Use ** for bold.\n\nTRANSCRIPT:\n{clean_transcript}"
+            f"3. **Keywords**: 5 tags.\n\n"
+            f"IMPORTANT: Use ** for bold.\n\nTRANSCRIPT:\n{clean_transcript}"
         )
         analysis_output = await loop.run_in_executor(None, call_gemini, analysis_prompt)
         await send_large_message(context, chat_id, f"🧠 *Second Brain Analysis*\n\n{analysis_output}")
         
+        # E. OPTIONAL OBSIDIAN SYNC (Sprint 1 Feature)
+        # 1. Gather potential triggers (Check Caption, then check Transcript)
+        trigger_text = message.caption or clean_transcript
+        
+        should_sync, project, warning = parse_vault_request(trigger_text)
+
+        if should_sync and vault:
+            # If there's a warning (e.g. missing project), send it now
+            if warning:
+                await context.bot.send_message(chat_id=chat_id, text=warning, parse_mode="Markdown")
+
+            await status_msg.edit_text(f"🚀 *Syncing to Obsidian:* `{project}`...")
+            
+            success = await loop.run_in_executor(
+                executor, 
+                vault.push_to_obsidian, 
+                project, 
+                clean_transcript, 
+                analysis_output
+            )
+            
+            if success:
+                await context.bot.send_message(chat_id=chat_id, text=f"✅ Saved to `{project}`.")
+            else:
+                await context.bot.send_message(chat_id=chat_id, text="⚠️ Vault sync failed.")
+
         await status_msg.delete()
 
     except Exception as e:
@@ -167,17 +244,25 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     chat_id = update.effective_chat.id
-    print(f"💬 TEXT NOTE FROM {update.message.from_user.first_name}")
+    user_name = update.message.from_user.first_name
     
-    prompt = f"Extract key insights and action items from this note for a Second Brain: {text}"
+    print(f"💬 TEXT NOTE FROM {user_name.upper()}")
+    
+    should_sync, project = parse_vault_request(text)
+    
+    prompt = f"Analyze this text note for a Second Brain. Extract key insights and action items: {text}"
     loop = asyncio.get_event_loop()
     response = await loop.run_in_executor(None, call_gemini, prompt)
+    
     await context.bot.send_message(chat_id=chat_id, text=f"📝 *Note Captured*\n\n{response}", parse_mode="Markdown")
+
+    if should_sync and vault:
+        # For text notes, we treat the 'clean_transcript' as the raw text
+        await loop.run_in_executor(executor, vault.push_to_obsidian, project, text, response)
+        await context.bot.send_message(chat_id=chat_id, text=f"✅ Text synced to `{project}`.")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error(f"⚠️ System Error: {context.error}")
-    if "httpx" in str(context.error).lower():
-        await asyncio.sleep(5)
 
 # --- 5. ENTRY POINT ---
 if __name__ == '__main__':
@@ -190,12 +275,11 @@ if __name__ == '__main__':
         .build()
     )
 
-    # Combined handler for all audio-like messages (Fixes WhatsApp sharing)
+    # Handlers
     application.add_handler(MessageHandler(
         (filters.VOICE | filters.AUDIO | filters.Document.ALL), 
         process_media
     ))
-    
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
     application.add_error_handler(error_handler)
 

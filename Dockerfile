@@ -11,7 +11,7 @@ WORKDIR /app
 
 # 4. Copy the requirements file and install Python libraries
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN apt-get update && apt-get install -y ffmpeg git && rm -rf /var/lib/apt/lists/*
 
 # 5. Copy the rest of your code
 COPY . .
