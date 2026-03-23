@@ -50,7 +50,7 @@ if all([GITHUB_TOKEN, GITHUB_REPO_URL, GITHUB_USERNAME]):
     vault = VaultManager(GITHUB_REPO_URL, GITHUB_TOKEN, GITHUB_USERNAME)
     logger.info("📦 Vault Manager initialized and ready for sync.")
 else:
-    logger.warning("⚠️ Git environment variables missing. Obsidian sync will be disabled.")
+    logger.warning("⚠️ Git environment variables missing. Obsidian sync disabled.")
 
 print(f"\n{'='*50}")
 print(f"🧠 SECOND BRAIN SYSTEM STARTING AT {datetime.now().strftime('%H:%M:%S')}")
@@ -84,54 +84,58 @@ def restricted(func):
 
 def parse_vault_request(text):
     """
-    Identifies #2ndBrain and sorts into project folders.
-    Supports case-insensitive hashtags and folder casing preservation.
+    Super-robust intent parser.
+    Matches: #2ndBrain, 'second brain', '2nd brain' (case insensitive).
+    Returns (should_sync, project_name, error_msg)
     """
     if not text:
         return False, None, None
     
-    tags = re.findall(r"#(\w+)", text)
     text_lower = text.lower()
     
-    # Check for #2ndBrain or spoken keywords
-    has_sync_intent = any(t.lower() == "2ndbrain" for t in tags) or "second brain" in text_lower
+    # 1. Broad intent check using regex for hashtags or spoken variations
+    intent_pattern = r"(#?2nd\s?brain|#?second\s?brain)"
+    has_sync_intent = bool(re.search(intent_pattern, text_lower))
     
     if not has_sync_intent:
         return False, None, None
 
+    # 2. Extract hashtags for project identification
+    tags = re.findall(r"#(\w+)", text)
     known_projects = ["Feena", "AISolutions", "Zil"]
     found_project = None
     
-    # 1. Try to find a hashtag match first
+    # Check hashtag matches first (Priority)
     for t in tags:
         match = next((p for p in known_projects if p.lower() == t.lower()), None)
         if match:
             found_project = match
             break
             
-    # 2. Try raw text match (for voice notes)
+    # Fallback: check if the raw text mentions the project name (for native voice notes)
     if not found_project:
         for project in known_projects:
             if project.lower() in text_lower:
                 found_project = project
                 break
 
+    # Log the decision to Railway Console for debugging
+    logger.info(f"🔍 Intent Parser: Sync={has_sync_intent}, Project={found_project}, Input='{text[:50]}...' ")
+
     if found_project:
         return True, found_project, None
     else:
-        other_tags = [t for t in tags if t.lower() != "2ndbrain"]
-        if other_tags:
-            return True, "00_Inbox", f"⚠️ Project `#{other_tags[0]}` not recognized. Using `00_Inbox`."
+        # User intended to sync but didn't specify a valid project
         return True, "00_Inbox", "💡 *Tip:* Mention a project (e.g. `#Feena`) to sort this note."
 
 async def send_large_message(context, chat_id, text, parse_mode="Markdown"):
-    """Handles long text and protects against Telegram's fragile Markdown parser."""
+    """Handles long text and aggressively falls back to plain text on parser errors."""
     parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
     for part in parts:
         try:
             await context.bot.send_message(chat_id=chat_id, text=part, parse_mode=parse_mode)
         except Exception as e:
-            logger.warning(f"Formatting failed, falling back to plain text: {e}")
+            logger.warning(f"⚠️ Markdown failed, sending as plain text: {e}")
             await context.bot.send_message(chat_id=chat_id, text=part, parse_mode=None)
 
 def call_gemini(prompt):
@@ -172,8 +176,7 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file_id = message.document.file_id
             file_label = "Shared Audio"
     
-    if not file_id:
-        return 
+    if not file_id: return 
 
     print(f"\n📩 {file_label.upper()} FROM {user_name.upper()}")
     status_msg = await context.bot.send_message(chat_id=chat_id, text=f"⏳ *{file_label} received.* Processing...")
@@ -197,16 +200,16 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         analysis_prompt = f"Analyze for {user_name}'s Second Brain. Use ** for bold. Summarize and list Action Items:\n\n{clean_transcript}"
         analysis_output = await loop.run_in_executor(None, call_gemini, analysis_prompt)
 
-        # C. ROBUST MESSAGING (Try/Except so formatting errors don't stop the sync)
+        # C. DISPLAY RESULTS (Decoupled with Try/Except)
         try:
             await send_large_message(context, chat_id, f"📜 *Full Transcript*\n\n{clean_transcript}")
             await send_large_message(context, chat_id, f"🧠 *Second Brain Analysis*\n\n{analysis_output}")
         except Exception as msg_err:
-            logger.error(f"Messaging Display Error: {msg_err}")
-            await context.bot.send_message(chat_id=chat_id, text="⚠️ Display error occurred, but note is still processing for sync.")
+            logger.error(f"Display Error: {msg_err}")
+            await context.bot.send_message(chat_id=chat_id, text="⚠️ Display error occurred, proceeding to vault sync...")
 
-        # D. OBSIDIAN SYNC (Triggered by Caption or Transcript)
-        trigger_text = message.caption or clean_transcript
+        # D. OBSIDIAN SYNC (Triggered by Caption OR Spoken words)
+        trigger_text = f"{message.caption or ''} {clean_transcript or ''}"
         should_sync, project, warning = parse_vault_request(trigger_text)
 
         if should_sync and vault:
@@ -240,9 +243,10 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     chat_id = update.effective_chat.id
-    print(f"💬 TEXT NOTE FROM {update.message.from_user.first_name}")
     
-    # FIXED: Unpack 3 values
+    print(f"💬 TEXT NOTE FROM {update.message.from_user.first_name.upper()}")
+    
+    # Corrected Unpacking (3 values)
     should_sync, project, warning = parse_vault_request(text)
     
     prompt = f"Analyze this note for a Second Brain. Extract insights/tasks: {text}"
