@@ -15,7 +15,7 @@ from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filte
 from telegram.request import HTTPXRequest
 
 # Project Modules
-from config import ALLOWED_IDS
+from config import ALLOWED_IDS, VAULT_CONFIGS
 from vault_manager import VaultManager
 
 # --- 1. SETUP & CONFIG ---
@@ -27,15 +27,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Intent memory: {user_id: {"project": "Name", "expires": datetime}}
+# Intent memory: {user_id: {"project": "Name", "category": "Folder", "expires": datetime}}
 USER_PROJECT_INTENT = {}
 
 # Credentials
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GITHUB_REPO_URL = os.getenv("GITHUB_REPO_URL")
-GITHUB_USERNAME = os.getenv("GITHUB_USERNAME")
 
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
     raise ValueError("❌ Missing core API Keys in .env file!")
@@ -44,21 +41,15 @@ if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 gemini = genai.GenerativeModel("gemini-2.0-flash")
 
-# Initialize Vault Manager
-vault = None
-if all([GITHUB_TOKEN, GITHUB_REPO_URL, GITHUB_USERNAME]):
-    vault = VaultManager(GITHUB_REPO_URL, GITHUB_TOKEN, GITHUB_USERNAME)
-    logger.info("📦 Vault Manager initialized.")
-
 print(f"\n{'='*50}")
-print(f"🧠 SECOND BRAIN SYSTEM ONLINE")
+print(f"🧠 MULTI-TENANT SECOND BRAIN ONLINE")
 model = whisper.load_model("tiny", device="cpu") 
 print(f"--- ✅ Whisper Loaded ---")
 print(f"{'='*50}\n")
 
 executor = ThreadPoolExecutor(max_workers=1)
 
-# --- 2. SECURITY LAYER ---
+# --- 2. SECURITY & MULTI-TENANCY ---
 
 def restricted(func):
     """Decorator to only allow authorized IDs."""
@@ -72,34 +63,55 @@ def restricted(func):
         return await func(update, context, *args, **kwargs)
     return wrapped
 
+def get_vault_for_user(user_id):
+    """Factory function to retrieve the correct VaultManager based on User ID."""
+    cfg = VAULT_CONFIGS.get(user_id)
+    if not cfg:
+        return None
+    return VaultManager(
+        repo_url=cfg["repo_url"],
+        token=cfg["token"],
+        username=cfg["username"]
+    )
+
 # --- 3. UTILITY FUNCTIONS ---
 
-def parse_vault_request(text):
-    """Identifies #2ndBrain and project name. Returns (should_sync, project_name)."""
-    if not text: return False, None
+def parse_vault_request(text, user_map):
+    """
+    Identifies intent based on the specific user's category map.
+    Returns (should_sync, category, project, warning)
+    """
+    if not text: return False, None, None, None
     text_lower = text.lower()
     
+    # 1. Check for sync intent
     intent_pattern = r"(#?2nd\s?brain|#?second\s?brain)"
-    has_sync_intent = bool(re.search(intent_pattern, text_lower))
-    if not has_sync_intent: return False, None
+    if not bool(re.search(intent_pattern, text_lower)): 
+        return False, None, None, None
 
-    known_projects = ["Feena", "AISolutions", "Zil"]
+    # 2. Get tags valid ONLY for this specific user
+    known_tags = list(user_map.keys())
     tags = re.findall(r"#(\w+)", text)
-    found_project = None
     
+    found_tag = None
     for t in tags:
-        match = next((p for p in known_projects if p.lower() == t.lower()), None)
+        match = next((p for p in known_tags if p.lower() == t.lower()), None)
         if match:
-            found_project = match
+            found_tag = match
             break
             
-    if not found_project:
-        for project in known_projects:
-            if project.lower() in text_lower:
-                found_project = project
+    if not found_tag:
+        for tag in known_tags:
+            if tag.lower() in text_lower:
+                found_tag = tag
                 break
 
-    return True, (found_project or "00_Inbox")
+    if found_tag:
+        # Success: Return sync=True, the mapped Category, and the Project name
+        return True, user_map[found_tag], found_tag, None
+    else:
+        # Fallback to Inbox
+        return True, "00_Inbox", "00_Inbox", "💡 *Tip:* Mention a project name to sort this note."
 
 def get_clean_content(text):
     """Strips hashtags and sync keywords to keep AI analysis clean."""
@@ -109,7 +121,6 @@ def get_clean_content(text):
     return text.strip()
 
 async def send_large_message(context, chat_id, text, parse_mode="Markdown"):
-    """Splits long text and falls back to plain text on error."""
     if not text: return
     parts = [text[i:i+3900] for i in range(0, len(text), 3900)]
     for part in parts:
@@ -126,7 +137,12 @@ def call_gemini(prompt):
         logger.error(f"Gemini Error: {e}")
         return f"⚠️ AI Error: {e}"
 
-# --- 4. BRAIN LOGIC ---
+def transcribe_sync(file_path: str):
+    print(f"🎙️  [Whisper] Transcribing {file_path}...")
+    result = model.transcribe(file_path, fp16=False)
+    return result["text"]
+
+# --- 4. BOT BRAIN LOGIC ---
 
 @restricted
 async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -145,43 +161,56 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # A. WHISPER TRANSCRIPTION
         voice_file = await context.bot.get_file(file_id)
         await voice_file.download_to_drive(temp_path)
-        raw_transcript = await asyncio.get_event_loop().run_in_executor(executor, lambda: model.transcribe(temp_path, fp16=False)["text"])
+        loop = asyncio.get_event_loop()
+        raw_transcript = await loop.run_in_executor(executor, transcribe_sync, temp_path)
 
-        # B. CONTEXT COORDINATION (Check buffer for hashtags sent in previous message)
+        # B. CONTEXT COORDINATION
+        user_cfg = VAULT_CONFIGS.get(user_id)
+        user_map = user_cfg.get("category_map", {})
+        
         current_time = datetime.now()
         buffered = USER_PROJECT_INTENT.get(user_id)
-        project_context = "00_Inbox"
+        
+        target_category = "00_Inbox"
+        target_project = "00_Inbox"
         is_syncing = False
         
-        # Priority 1: Audio Caption | Priority 2: 60s Buffer | Priority 3: Transcript words
-        should_sync_cap, cap_proj = parse_vault_request(message.caption or "")
+        # Priority: Caption > Buffer > Transcript keywords
+        should_sync_cap, cap_cat, cap_proj, _ = parse_vault_request(message.caption or "", user_map)
         if should_sync_cap:
-            project_context, is_syncing = cap_proj, True
+            target_category, target_project, is_syncing = cap_cat, cap_proj, True
         elif buffered and buffered["expires"] > current_time:
-            project_context, is_syncing = buffered["project"], True
-            del USER_PROJECT_INTENT[user_id] # Use once and clear
+            target_category, target_project, is_syncing = buffered["category"], buffered["project"], True
+            del USER_PROJECT_INTENT[user_id] 
         else:
-            should_sync_trans, trans_proj = parse_vault_request(raw_transcript)
+            should_sync_trans, trans_cat, trans_proj, _ = parse_vault_request(raw_transcript, user_map)
             if should_sync_trans:
-                project_context, is_syncing = trans_proj, True
+                target_category, target_project, is_syncing = trans_cat, trans_proj, True
 
-        # C. AI ANALYSIS (Scrubbed of technical tags)
+        # C. AI ANALYSIS
         clean_content = get_clean_content(raw_transcript)
         if not clean_content: clean_content = "[No spoken words detected]"
+        clean_transcript = await loop.run_in_executor(None, call_gemini, f"Fix grammar and punctuation for {user_name}:\n\n{clean_content}")
+        analysis_output = await loop.run_in_executor(None, call_gemini, f"Analyze for Second Brain Summary & Action Items:\n\n{clean_transcript}")
 
-        clean_transcript = await asyncio.get_event_loop().run_in_executor(None, call_gemini, f"Fix grammar and punctuation for {user_name}:\n\n{clean_content}")
-        analysis_output = await asyncio.get_event_loop().run_in_executor(None, call_gemini, f"Analyze for Second Brain. Provide Summary & Action Items:\n\n{clean_transcript}")
-
-        # D. VAULT SYNC
-        if is_syncing and vault:
-            await status_msg.edit_text(f"🚀 Syncing to `{project_context}`...")
-            success = await asyncio.get_event_loop().run_in_executor(executor, vault.push_to_obsidian, project_context, clean_transcript, analysis_output)
-            if success:
-                await context.bot.send_message(chat_id=chat_id, text=f"✅ *2nd Brain updated successfully* in project `{project_context}`!")
-            else:
-                await context.bot.send_message(chat_id=chat_id, text="⚠️ Vault sync failed.")
+        # D. DYNAMIC VAULT SYNC
+        if is_syncing:
+            user_vault = get_vault_for_user(user_id)
+            if user_vault:
+                await status_msg.edit_text(f"🚀 Syncing to `{target_project}`...")
+                success = await loop.run_in_executor(
+                    executor, 
+                    user_vault.push_to_obsidian, 
+                    target_category, 
+                    target_project, 
+                    clean_transcript, 
+                    analysis_output
+                )
+                if success:
+                    await context.bot.send_message(chat_id=chat_id, text=f"✅ *2nd Brain updated successfully* in project `{target_project}`!")
+                else:
+                    await context.bot.send_message(chat_id=chat_id, text="⚠️ Vault sync failed.")
         else:
-            # Traditional behavior: Output everything to Telegram if no hashtags found
             await send_large_message(context, chat_id, f"📜 *Full Transcript*\n\n{clean_transcript}")
             await send_large_message(context, chat_id, f"🧠 *Second Brain Analysis*\n\n{analysis_output}")
 
@@ -199,13 +228,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     
-    should_sync, project = parse_vault_request(text)
+    user_cfg = VAULT_CONFIGS.get(user_id)
+    user_map = user_cfg.get("category_map", {})
+    
+    # UNPACK 4 VALUES
+    should_sync, category, project, warning = parse_vault_request(text, user_map)
     clean_text = get_clean_content(text)
     
-    # If message is JUST tags (e.g. #2ndbrain #zil), store context for 60 seconds
+    # If message is JUST tags, store context for 60 seconds (Include category!)
     if should_sync and not clean_text:
         USER_PROJECT_INTENT[user_id] = {
             "project": project,
+            "category": category,
             "expires": datetime.now() + timedelta(seconds=60)
         }
         await context.bot.send_message(chat_id=chat_id, text=f"🏷️ Context set: `{project}`. Send your audio now!")
@@ -214,9 +248,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Normal text processing
     response = await asyncio.get_event_loop().run_in_executor(None, call_gemini, f"Analyze: {clean_text}")
 
-    if should_sync and vault:
-        await asyncio.get_event_loop().run_in_executor(executor, vault.push_to_obsidian, project, clean_text, response)
-        await context.bot.send_message(chat_id=chat_id, text=f"✅ *2nd Brain updated successfully* in `{project}`!")
+    if should_sync:
+        user_vault = get_vault_for_user(user_id)
+        if user_vault:
+            await asyncio.get_event_loop().run_in_executor(
+                executor, 
+                user_vault.push_to_obsidian, 
+                category, 
+                project, 
+                clean_text, 
+                response
+            )
+            await context.bot.send_message(chat_id=chat_id, text=f"✅ *2nd Brain updated successfully* in `{project}`!")
+            if warning: await context.bot.send_message(chat_id=chat_id, text=warning)
     else:
         await send_large_message(context, chat_id, f"📝 *Note Captured*\n\n{response}")
 

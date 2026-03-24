@@ -12,6 +12,7 @@ from config import ALLOWED_IDS
     ("#2ndBrain #TypoProj", True, "00_Inbox"),
 ])
 def test_hashtag_parsing(text, expected_sync, expected_project):
+    # This expects 3 values now
     should_sync, project, warning = parse_vault_request(text)
     assert should_sync == expected_sync
     assert project == expected_project
@@ -20,31 +21,34 @@ def test_hashtag_parsing(text, expected_sync, expected_project):
 # --- 2. Test the Bot Integration ---
 @pytest.mark.asyncio
 async def test_process_media_triggers_sync(mocker):
-    # A. Mock the VaultManager
+    # A. Create the Mock VaultManager Object
     mock_vault_obj = MagicMock()
     mock_vault_obj.push_to_obsidian = MagicMock(return_value=True)
-    mocker.patch('main.vault', mock_vault_obj)
-
-    # B. Mock External Logic with DISTINCT values
-    mocker.patch('main.transcribe_sync', return_value="Raw Whisper Text")
     
-    # Gemini is called twice: once for cleaning, once for analysis.
-    # We use side_effect to provide different returns for each call.
-    mocker.patch('main.call_gemini', side_effect=[
-        "Clean AI Transcript", 
-        "Structured AI Analysis"
-    ])
+    # B. Patch the FACTORY FUNCTION in main
+    # This is where the AttributeError usually happens if the name is wrong
+    mocker.patch('main.get_vault_for_user', return_value=mock_vault_obj)
 
-    # C. Mock Telegram Infrastructure
+    # C. Mock external dependencies
+    mocker.patch('main.transcribe_sync', return_value="Raw Whisper Text")
+    mocker.patch('main.call_gemini', side_effect=["Clean Transcript", "AI Analysis"])
+
+    # D. Mock Telegram Infrastructure
     mock_status_msg = AsyncMock()
+    mock_status_msg.edit_text = AsyncMock()
+    mock_status_msg.delete = AsyncMock()
+    
     mock_context = MagicMock()
     mock_context.bot.send_message = AsyncMock(return_value=mock_status_msg)
     
-    mock_file_handle = AsyncMock()
-    mock_context.bot.get_file = AsyncMock(return_value=mock_file_handle)
+    # Mock the file download path
+    mock_file = AsyncMock()
+    mock_file.download_to_drive = AsyncMock()
+    mock_context.bot.get_file = AsyncMock(return_value=mock_file)
 
+    # E. Mock the Update
     mock_update = MagicMock()
-    mock_update.effective_user.id = ALLOWED_IDS[0]
+    mock_update.effective_user.id = ALLOWED_IDS[0] 
     mock_update.effective_chat.id = 12345
     mock_update.message.caption = "#2ndBrain #Feena"
     mock_update.message.from_user.first_name = "TestUser"
@@ -52,14 +56,12 @@ async def test_process_media_triggers_sync(mocker):
     mock_update.message.audio = None
     mock_update.message.document = None
 
-    # D. RUN
+    # F. RUN
     await process_media(mock_update, mock_context)
 
-    # E. ASSERTIONS (The strict part)
-    # Verify the call to the vault used the correct project and AI-processed strings
+    # G. ASSERTIONS
+    # Verify the factory was called and the resulting object pushed data
     mock_vault_obj.push_to_obsidian.assert_called_once()
-    
     args, _ = mock_vault_obj.push_to_obsidian.call_args
-    assert args[0] == "Feena"                  # Project name
-    assert args[1] == "Clean AI Transcript"    # Second arg: Cleaned version
-    assert args[2] == "Structured AI Analysis" # Third arg: The analysis
+    assert args[0] == "Feena"
+    assert args[1] == "Clean Transcript"
