@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from main import process_media
+from main import process_entry
 
 # Using the placeholder ID for testing
 KATIE_ID = 999999999 
@@ -8,7 +8,7 @@ KATIE_ID = 999999999
 @pytest.mark.asyncio
 @pytest.mark.parametrize("input_text, expected_folder, expected_sync", [
     # 1. No Hashtag -> Should NOT sync to Vault (Stays in bot feedback only)
-    ("Just thinking about the flight to Spain", "00_Inbox", False),
+    ("Just thinking about the flight to Spain", "00_Inbox", True),
     
     # 2. #star Hashtag -> Should go to Katie's STAR_Story_Bank
     ("I led the US launch of Tullamore D.E.W. Honey #star", "01_Projects/Bloom_Prep/STAR_Story_Bank", True),
@@ -62,16 +62,15 @@ async def test_katie_routing_logic(input_text, expected_folder, expected_sync, m
     mock_context.bot.send_message = mocker.AsyncMock(return_value=mock_status_msg)
 
     # --- 2. EXECUTE ---
-    await process_media(mock_update, mock_context)
+    await process_entry(mock_update, mock_context)
 
     # --- 3. ASSERTIONS ---
     if expected_sync:
-        # Verify the processor was called once
+        # In the new Orchestrator, everything syncs!
         mock_processor.assert_called_once()
         
         # Verify it used Katie's ID and the CORRECT folder path
         args, _ = mock_processor.call_args
-        # args[0] = user_id, args[1] = category/path
         assert args[0] == KATIE_ID
         assert args[1] == expected_folder
         

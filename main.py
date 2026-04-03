@@ -1,111 +1,105 @@
 import os
 import logging
+import asyncio
+from datetime import datetime
 from dotenv import load_dotenv
 
-# Telegram Imports
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
-# Project Modules (The Service Layer)
-from config import ALLOWED_IDS, VAULT_CONFIGS
+from config import VAULT_CONFIGS
 from bot_utils import restricted, parse_vault_request, send_large_message
 from transcriber import Transcriber
 from processor import TaskProcessor
 
 # --- 1. SETUP ---
 load_dotenv()
-
 logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
 # Initialize Services
-# We load the heavy Whisper model once here
 transcriber = Transcriber(model_name="tiny") 
 processor = TaskProcessor()
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-
-# --- 2. CORE HANDLERS ---
+# --- 2. CORE LOGIC ---
 
 @restricted
-async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles Voice and Audio notes: Download -> Transcribe -> AI -> Sync."""
-    chat_id = update.effective_chat.id
+async def process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Unified handler for Voice, Audio, and Text.
+    ALWAYS pushes to Obsidian. Routes based on spoken hashtags.
+    """
     user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
     user_name = update.effective_user.first_name
-
-    status_msg = await context.bot.send_message(chat_id=chat_id, text="⏳ Processing audio...")
-
-    try:
-        # A. Audio Lifecycle (Transcriber)
-        temp_path = await transcriber.get_voice_file(update, context)
-        if not temp_path:
-            return
-            
-        raw_transcript = await transcriber.transcribe(temp_path)
-        if not raw_transcript:
-            await status_msg.edit_text("🤷 I couldn't hear any words in that audio.")
-            return
-
-        # B. Intent Parsing (Bot Utils)
-        user_cfg = VAULT_CONFIGS.get(user_id)
-        should_sync, cat, proj, warning = parse_vault_request(raw_transcript, user_cfg["category_map"])
-
-        # C. Processing & Persistence (Processor)
-        if should_sync:
-            await status_msg.edit_text(f"🚀 Syncing to `{proj}`...")
-            clean, analysis, success = await processor.run_sync_stack(
-                user_id, cat, proj, raw_transcript, user_name
-            )
-            
-            if success:
-                await context.bot.send_message(chat_id=chat_id, text=f"✅ *Vault & NotebookLM Updated* in `{proj}`!")
-            else:
-                await context.bot.send_message(chat_id=chat_id, text="⚠️ Partial failure: Check GitHub/Google Docs.")
-        else:
-            # Fallback for notes with no hashtags (Inbox)
-            await status_msg.edit_text("📝 Note captured to Inbox (No sync requested).")
-            # You could add a call to processor here too if you want AI cleaning for Inbox notes
-
-    except Exception as e:
-        logger.error(f"Error in process_media: {e}")
-        await context.bot.send_message(chat_id=chat_id, text=f"❌ System Error: {e}")
-    finally:
-        await status_msg.delete()
-
-@restricted
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles raw text notes similarly to audio."""
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-    text = update.message.text
     user_cfg = VAULT_CONFIGS.get(user_id)
 
-    should_sync, cat, proj, _ = parse_vault_request(text, user_cfg["category_map"])
+    status_msg = await context.bot.send_message(chat_id=chat_id, text="⏳ Processing...")
 
-    if should_sync:
-        clean, analysis, success = await processor.run_sync_stack(
-            user_id, cat, proj, text, update.effective_user.first_name
+    try:
+        # A. Get Content (Transcribe if audio, else take text)
+        if update.message.voice or update.message.audio:
+            temp_path = await transcriber.get_voice_file(update, context)
+            raw_content = await transcriber.transcribe(temp_path)
+        else:
+            raw_content = update.message.text
+
+        if not raw_content or len(raw_content.strip()) < 2:
+            await status_msg.edit_text("🤷 I didn't catch that. Audio might be too short.")
+            return
+
+        # B. Routing Logic
+        # parse_vault_request checks for hashtags like #star in the transcript
+        should_sync, target_cat, target_proj, _ = parse_vault_request(raw_content, user_cfg["category_map"])
+
+        # SENIOR MOVE: If no hashtag was found, we FORCE a sync to the Inbox anyway
+        if not should_sync:
+            target_cat = "00_Inbox"
+            target_proj = "00_Inbox"
+            logger.info(f"No hashtag found. Defaulting to Inbox for {user_name}")
+
+        # C. Execute Processing & Parallel Pushing
+        await status_msg.edit_text(f"🚀 Syncing to `{target_proj}`...")
+        
+        clean_text, analysis, success = await processor.run_sync_stack(
+            user_id, target_cat, target_proj, raw_content, user_name
         )
+
+        # D. Feedback Loop
         if success:
-            await context.bot.send_message(chat_id=chat_id, text=f"✅ *Text Note Synced* to `{proj}`!")
-    else:
-        # Default text handling logic
-        await context.bot.send_message(chat_id=chat_id, text="📝 Note saved to Inbox.")
+            # We send a fresh message for the confirmation so it doesn't get lost
+            confirm_icon = "🌟" if "#star" in raw_content.lower() else "📥"
+            await context.bot.send_message(
+                chat_id=chat_id, 
+                text=f"{confirm_icon} *Obsidian Updated!*\nSaved to: `{target_proj}`"
+            )
+            # Send back the transcript so the user can see what the AI processed
+            await send_large_message(context, chat_id, f"📝 *Transcript Preview:*\n\n{clean_text}")
+            await status_msg.delete()
+        else:
+            await status_msg.edit_text("⚠️ Sync finished with errors. Check GitHub/Google Docs.")
+
+    except Exception as e:
+        logger.error(f"Error in process_entry: {e}")
+        await status_msg.edit_text(f"❌ System Error: {str(e)}")
 
 # --- 3. ENTRY POINT ---
 if __name__ == '__main__':
-    # Build with increased timeouts for large voice files
-    request_config = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).request(request_config).build()
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        raise ValueError("TELEGRAM_BOT_TOKEN not found in environment!")
 
-    # Register Handlers
-    app.add_handler(MessageHandler((filters.VOICE | filters.AUDIO), process_media))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
+    # Increased timeouts for larger voice note processing
+    request_config = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
+    app = ApplicationBuilder().token(token).request(request_config).build()
+
+    # We route all inputs (Voice, Audio, Text) through the same logic
+    app.add_handler(MessageHandler((filters.VOICE | filters.AUDIO), process_entry))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), process_entry))
     
-    print(f"🚀 Katie's 2nd Brain Online (Orchestrator Mode)")
+    logger.info("🧠 Katie's 2nd Brain: Orchestrator Mode Online")
     app.run_polling(drop_pending_updates=True)
