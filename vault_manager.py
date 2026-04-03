@@ -1,77 +1,70 @@
 import os
-import shutil
-import tempfile
 import logging
-from git import Repo
 from datetime import datetime
+from git import Repo
 from templates import NoteTemplate
 
 logger = logging.getLogger(__name__)
 
 class VaultManager:
     def __init__(self, repo_url, token, username):
-        """
-        Initializes the manager with user-specific credentials.
-        Constructs an authenticated URL for Git operations.
-        """
-        # Inject the token into the URL for HTTPS authentication
-        self.auth_url = repo_url.replace("https://", f"https://{username}:{token}@")
+        self.repo_url = repo_url
+        self.token = token
         self.username = username
+        self.temp_dir = f"temp_vault_{username}"
+        
+        # Format URL with token for authentication
+        self.auth_url = self.repo_url.replace("https://", f"https://{username}:{token}@")
 
-    def push_to_obsidian(self, category, project, clean_transcript, analysis_output):
+    def push_to_obsidian(self, target_category, target_project, clean_transcript, analysis_output):
         """
-        Clones the user's vault, appends the note to the correct project folder,
-        and pushes the changes back to GitHub.
+        Clones, updates, and pushes a Markdown entry to the specific GitHub vault.
         """
-        tmp_dir = tempfile.mkdtemp()
         try:
-            # 1. Shallow clone for speed (only the latest commit)
             logger.info(f"Cloning vault for user {self.username}...")
-            repo = Repo.clone_from(self.auth_url, tmp_dir, depth=1)
-            
-            # 2. Determine target folder path based on Category and Project
-            # Logic: If category is '00_Inbox', project name is omitted from path.
-            if category == "00_Inbox":
-                target_folder = os.path.join(tmp_dir, "00_Inbox", "📥 TelegramCaptures")
-            else:
-                target_folder = os.path.join(tmp_dir, category, project, "📥 TelegramCaptures")
-            
-            # Ensure the folder structure exists
-            os.makedirs(target_folder, exist_ok=True)
-            
-            # 3. Prepare the daily note file
-            filename = f"{datetime.now().strftime('%Y-%m-%d')}.md"
-            file_path = os.path.join(target_folder, filename)
-            
-            # Check if this is a brand new file for the day
-            is_new_file = not os.path.exists(file_path)
-            
-            # Get formatted content from templates
-            entry_content = NoteTemplate.format_entry(clean_transcript, analysis_output)
-            
-            # 4. Write/Append to file
-            with open(file_path, "a", encoding="utf-8") as f:
-                if is_new_file:
-                    # Write the YAML frontmatter and daily header if it's a new file
-                    f.write(NoteTemplate.get_daily_header(project))
-                f.write(entry_content)
+            if os.path.exists(self.temp_dir):
+                import shutil
+                shutil.rmtree(self.temp_dir)
 
-            # 5. Git Commit & Push
-            repo.index.add([file_path])
-            commit_msg = f"Capture: {project} at {datetime.now().strftime('%H:%M')}"
-            repo.index.commit(commit_msg)
+            repo = Repo.clone_from(self.auth_url, self.temp_dir)
             
-            logger.info(f"Pushing update to GitHub: {commit_msg}")
-            repo.remote(name='origin').push()
+            # Ensure the target directory exists in the vault
+            full_folder_path = os.path.join(self.temp_dir, target_category)
+            os.makedirs(full_folder_path, exist_ok=True)
+
+            # Create file name based on date (Obsidian Daily Note style)
+            date_str = datetime.now().strftime('%Y-%m-%d')
+            file_name = f"{date_str}.md"
+            file_path = os.path.join(full_folder_path, file_name)
+
+            # --- SENIOR LOGIC: Formatting ---
+            # Check if this is a STAR story to set the correct icon in Obsidian
+            is_star = "STAR_Story_Bank" in target_category
+
+            # Ensure the note exists and has frontmatter
+            if not os.path.exists(file_path):
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(NoteTemplate.get_frontmatter(target_project, self.username))
+
+            # Append the formatted entry (using callouts for high-readability)
+            with open(file_path, 'a', encoding='utf-8') as f:
+                f.write(NoteTemplate.format_entry(clean_transcript, analysis_output, is_star=is_star))
+
+            # Git Push sequence
+            repo.git.add(A=True)
+            repo.index.commit(f"New capture via 2ndBrain Bot: {target_project}")
+            origin = repo.remote(name='origin')
+            origin.push()
             
+            logger.info(f"✅ Successfully pushed to GitHub for {self.username}")
             return True
 
         except Exception as e:
             logger.error(f"Vault Sync Error: {e}")
             return False
-            
         finally:
-            # Always clean up the temporary directory to save server space
-            if os.path.exists(tmp_dir):
-                shutil.rmtree(tmp_dir)
+            # Cleanup temp folder to prevent Railway disk saturation
+            if os.path.exists(self.temp_dir):
+                import shutil
+                shutil.rmtree(self.temp_dir)
                 logger.info("Temporary workspace cleaned.")
