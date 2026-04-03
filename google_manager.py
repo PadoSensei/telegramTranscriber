@@ -1,5 +1,6 @@
 import os
 import logging
+import json
 from datetime import datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -8,19 +9,40 @@ logger = logging.getLogger(__name__)
 
 class GoogleManager:
     def __init__(self):
-        self.creds_path = os.getenv("KATIE_OD_GOOGLE_DRIVE")
+        # Fallback naming for local dev
+        self.creds_path = os.getenv("KATIE_OD_GOOGLE_DRIVE") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
         self.scopes = ['https://www.googleapis.com/auth/documents']
 
     def _get_service(self):
-        """Internal helper to build the Google Docs service."""
-        if not self.creds_path or not os.path.exists(self.creds_path):
-            logger.error("❌ Google Credentials file missing.")
+        """
+        Internal helper to build the Google Docs service.
+        Prioritizes GCP_JSON_CONTENT (Railway) over local file paths.
+        """
+        try:
+            # 1. Try to load from Environment Variable (Railway Mode)
+            raw_json = os.getenv("GCP_JSON_CONTENT")
+            if raw_json:
+                logger.info("🔐 Authenticating via GCP_JSON_CONTENT (Env Var)")
+                info = json.loads(raw_json)
+                creds = service_account.Credentials.from_service_account_info(
+                    info, scopes=self.scopes
+                )
+                return build('docs', 'v1', credentials=creds)
+
+            # 2. Fallback to local JSON file (Local Dev Mode)
+            if self.creds_path and os.path.exists(self.creds_path):
+                logger.info(f"📂 Authenticating via local file: {self.creds_path}")
+                creds = service_account.Credentials.from_service_account_file(
+                    self.creds_path, scopes=self.scopes
+                )
+                return build('docs', 'v1', credentials=creds)
+
+            logger.error("❌ No Google Credentials found in Env (GCP_JSON_CONTENT) or File.")
             return None
-            
-        creds = service_account.Credentials.from_service_account_file(
-            self.creds_path, scopes=self.scopes
-        )
-        return build('docs', 'v1', credentials=creds)
+
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Google Docs Service: {e}")
+            return None
 
     async def sync_to_doc(self, user_cfg, title, content, analysis):
         """Appends formatted STAR stories or research to a Google Doc."""
@@ -30,7 +52,8 @@ class GoogleManager:
 
         try:
             service = self._get_service()
-            if not service: return False
+            if not service: 
+                return False
 
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
             
@@ -50,7 +73,7 @@ class GoogleManager:
                 }
             }]
 
-            # Batch update is faster and more reliable
+            # Batch update for reliable appending
             service.documents().batchUpdate(
                 documentId=doc_id, 
                 body={'requests': requests}
