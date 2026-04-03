@@ -1,9 +1,22 @@
+# --- Core Bot & Networking ---
 python-telegram-bot
+httpx
+
+# --- AI & Transcription ---
 openai-whisper
 google-generativeai
+tenacity
+
+# --- Google Workspace (Drive/Docs Sync) ---
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+
+# --- Vault & Environment Management ---
 python-dotenv
-httpx
 GitPython
+
+# --- Testing & Development ---
 pytest
 pytest-asyncio
 pytest-mock

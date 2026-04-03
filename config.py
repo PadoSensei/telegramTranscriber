@@ -51,8 +51,33 @@ VAULT_CONFIGS = {
             "ScrimbaBackendCourse": "01_Study",
             "Investing": "02_Money"
         }
+    },
+
+
+    # --------------------------------------
+    # KATIE O'DONOGHUE'S VAULT (Bloom Interview Prep)
+    # --------------------------------------
+    # NOTE: You need to get Katie's actual Telegram ID. 
+    # If she messages the bot, the logs will show "Unauthorized access attempt by ID: XXXXXXX"
+    # Replace the placeholder below with her ID.
+    6426489405: {  
+        "name": "katie_OD",
+        "repo_url": os.getenv("KATIE_OD_REPO_URL"),
+        "token": os.getenv("KATIE_OD_TOKEN"),
+        "username": os.getenv("KATIE_OD_NAME"),
+        "gdrive_folder_id": os.getenv("KATIE_OD_GOOGLE_DRIVE"), # 1GF0tsKgzTNUhGmrHWBIR0GR-vRYB3zqS
+        
+        # Folder structure designed for Bloom & NotebookLM
+        "category_map": {
+            "Star": "01_Projects/Bloom_Prep/STAR_Story_Bank",
+            "Bloom": "01_Projects/Bloom_Prep",
+            "Source": "01_Projects/Bloom_Prep/NotebookLM_Sources",
+            "Inbox": "00_Inbox",
+            "Progress": "Progress_Summaries"
+        }
     }
 }
 
 # Keep this list dynamic for the @restricted security decorator in main.py
 ALLOWED_IDS = list(VAULT_CONFIGS.keys())
+

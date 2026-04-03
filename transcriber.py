@@ -1,0 +1,71 @@
+import os
+import asyncio
+import whisper
+import logging
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+
+logger = logging.getLogger(__name__)
+
+class Transcriber:
+    def __init__(self, model_name="tiny", device="cpu"):
+        """
+        Initializes the Whisper model once on startup.
+        'tiny' is best for speed on CPU; 'base' is better for accuracy.
+        """
+        logger.info(f"⏳ Loading Whisper model ({model_name})...")
+        self.model = whisper.load_model(model_name, device=device)
+        self.executor = ThreadPoolExecutor(max_workers=1) 
+        logger.info("✅ Whisper Transcriber Ready")
+
+    async def get_voice_file(self, update, context):
+        """
+        Downloads the voice note from Telegram to a unique local temp file.
+        """
+        message = update.message
+        voice = message.voice or message.audio
+        
+        if not voice:
+            return None
+
+        # Create a unique filename using timestamp and user ID
+        user_id = update.effective_user.id
+        timestamp = int(datetime.now().timestamp())
+        temp_path = f"temp_{user_id}_{timestamp}.oga"
+
+        # Download from Telegram
+        new_file = await context.bot.get_file(voice.file_id)
+        await new_file.download_to_drive(temp_path)
+        
+        return temp_path
+
+    def _sync_transcribe(self, file_path: str):
+        """
+        Synchronous wrapper for the heavy Whisper CPU work.
+        """
+        try:
+            logger.info(f"🎙️ [Whisper] Transcribing: {file_path}")
+            result = self.model.transcribe(file_path, fp16=False)
+            return result.get("text", "").strip()
+        except Exception as e:
+            logger.error(f"❌ Whisper Error: {e}")
+            return ""
+
+    async def transcribe(self, file_path: str):
+        """
+        Async entry point for transcription. 
+        Runs the CPU-heavy work in a thread to keep the bot responsive.
+        """
+        loop = asyncio.get_event_loop()
+        text = await loop.run_in_executor(self.executor, self._sync_transcribe, file_path)
+        
+        # Cleanup: Delete the temp file immediately after transcription
+        self.cleanup(file_path)
+        
+        return text
+
+    def cleanup(self, file_path: str):
+        """Removes the temporary audio file."""
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"🧹 Cleaned up: {file_path}")
