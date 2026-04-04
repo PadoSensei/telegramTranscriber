@@ -60,7 +60,7 @@ VAULT_CONFIGS = {
     # NOTE: You need to get Katie's actual Telegram ID. 
     # If she messages the bot, the logs will show "Unauthorized access attempt by ID: XXXXXXX"
     # Replace the placeholder below with her ID.
-    6426489405: {  
+    8630747869: {  
         "name": "katie_OD",
         "repo_url": os.getenv("KATIE_OD_REPO_URL"),
         "token": os.getenv("KATIE_OD_TOKEN"),
