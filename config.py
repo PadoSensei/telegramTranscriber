@@ -11,7 +11,7 @@ load_dotenv()
 
 VAULT_CONFIGS = {
     
-    # --------------------------------------
+ # --------------------------------------
     # LUDMILA'S VAULT (2ndBrain Repo)
     # --------------------------------------
     7187182620: {  
@@ -20,11 +20,16 @@ VAULT_CONFIGS = {
         "token": os.getenv("GITHUB_TOKEN"),
         "username": os.getenv("GITHUB_USERNAME"),
         
-        # Ludmila's specific project routing (Her projects live in '01_Projects')
+        # SYNCED MAPPING: Matches her "📥 TelegramCaptures" structure
         "category_map": {
-            "Zil": "01_Projects",
-            "Feena": "01_Projects",
-            "AISolutions": "01_Projects"
+            "Zil": "03_Projects/Zil/📥 TelegramCaptures",
+            "Feena": "03_Projects/Feena/📥 TelegramCaptures",
+            "AISolutions": "03_Projects/AISolutions/📥 TelegramCaptures",
+            
+            # Additional routes based on her root folders
+            "Study": "01_Study",
+            "Report": "02_Reports",
+            "Inbox": "00_Inbox"
         }
     },
     

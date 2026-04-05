@@ -1,6 +1,7 @@
 # ai_engine.py
 import os
 import google.generativeai as genai
+from google.generativeai.types import HarmCategory, HarmBlockThreshold 
 from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type
 from google.api_core import exceptions
 from templates import STAR_PROMPT, GENERAL_PROMPT
@@ -9,6 +10,13 @@ class AIEngine:
     def __init__(self):
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
         self.model = genai.GenerativeModel("gemini-2.0-flash")
+
+        self.safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
 
     @retry(
         retry=retry_if_exception_type(exceptions.ResourceExhausted),
