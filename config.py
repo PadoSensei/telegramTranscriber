@@ -16,9 +16,9 @@ VAULT_CONFIGS = {
     # --------------------------------------
     7187182620: {  
         "name": "Ludmila",
-        "repo_url": os.getenv("GITHUB_REPO_URL"),
-        "token": os.getenv("GITHUB_TOKEN"),
-        "username": os.getenv("GITHUB_USERNAME"),
+        "repo_url": os.getenv("LUDMILA_REPO_URL"),
+        "token":    os.getenv("LUDMILA_TOKEN"),
+        "username": os.getenv("LUDMILA_NAME"),
         
         # SYNCED MAPPING: Matches her "📥 TelegramCaptures" structure
         "category_map": {
@@ -62,15 +62,14 @@ VAULT_CONFIGS = {
     # --------------------------------------
     # KATIE O'DONOGHUE'S VAULT (Bloom Interview Prep)
     # --------------------------------------
-    # NOTE: You need to get Katie's actual Telegram ID. 
+    
     # If she messages the bot, the logs will show "Unauthorized access attempt by ID: XXXXXXX"
-    # Replace the placeholder below with her ID.
     8630747869: {  
         "name": "katie_OD",
         "repo_url": os.getenv("KATIE_OD_REPO_URL"),
         "token": os.getenv("KATIE_OD_TOKEN"),
         "username": os.getenv("KATIE_OD_NAME"),
-        "gdrive_folder_id": os.getenv("KATIE_OD_GOOGLE_DRIVE"), # 1GF0tsKgzTNUhGmrHWBIR0GR-vRYB3zqS
+        "gdrive_doc_id": os.getenv("KATIE_OD_GOOGLE_DRIVE"),
         
         # Folder structure designed for Bloom & NotebookLM
         "category_map": {

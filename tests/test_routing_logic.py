@@ -8,10 +8,10 @@ PADO_ID = 6426489405
 KATIE_ID = 8630747869
 
 @pytest.mark.parametrize("user_id, input_text, expected_path", [
-    # --- LUDMILA TESTS ---
-    (LUDMILA_ID, "Notes on #Zil project", "01_Projects"),
-    (LUDMILA_ID, "Update for #Feena", "01_Projects"),
-    (LUDMILA_ID, "No hashtag here", "00_Inbox"), # Fallback check
+    # --- LUDMILA TESTS (Updated to match 03_Projects nested structure) ---
+    (LUDMILA_ID, "Notes on #Zil project", "03_Projects/Zil/📥 TelegramCaptures"),
+    (LUDMILA_ID, "Update for #Feena", "03_Projects/Feena/📥 TelegramCaptures"),
+    (LUDMILA_ID, "No hashtag here", "00_Inbox"), 
 
     # --- PADOSENSEI TESTS ---
     (PADO_ID, "Training session #BJJDev", "03_Projects"),
@@ -24,8 +24,9 @@ KATIE_ID = 8630747869
     (KATIE_ID, "General #Bloom notes", "01_Projects/Bloom_Prep"),
     (KATIE_ID, "PDF source for #Source", "01_Projects/Bloom_Prep/NotebookLM_Sources"),
     (KATIE_ID, "Daily check-in #Progress", "Progress_Summaries"),
-    (KATIE_ID, "Random thought", "00_Inbox"), # Fallback check
+    (KATIE_ID, "Random thought", "00_Inbox"), 
 ])
+
 def test_multi_user_routing(user_id, input_text, expected_path):
     """
     Validates that each user's hashtags map to their unique folder structures.
@@ -72,7 +73,7 @@ def test_google_doc_trigger_flow(user_id, input_text, expected_google_trigger):
     user_cfg = VAULT_CONFIGS.get(user_id)
     
     # Check 1: Does the user even have a Google Drive destination?
-    has_gdrive = "gdrive_folder_id" in user_cfg
+    has_gdrive = "gdrive_doc_id" in user_cfg
     
     # Check 2: Does the content contain a "Bloom Bridge" hashtag?
     # These are the tags Katie uses to feed NotebookLM
@@ -98,7 +99,7 @@ def test_config_integrity():
         
         # Check if Katie specifically has her GDrive ID
         if cfg["name"] == "katie_OD":
-            assert "gdrive_folder_id" in cfg
+            assert "gdrive_doc_id" in cfg
             
         repo_urls.append(cfg["repo_url"])
 

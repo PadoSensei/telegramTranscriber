@@ -43,7 +43,7 @@ def test_env_config_readiness():
     # Special check for Katie's "NotebookLM Bridge"
     katie_cfg = next((cfg for cfg in VAULT_CONFIGS.values() if cfg["name"] == "katie_OD"), None)
     if katie_cfg:
-        assert katie_cfg.get("gdrive_folder_id") is not None, "FAIL: Katie's Google Drive ID is missing!"
+        assert katie_cfg.get("gdrive_doc_id") is not None, "FAIL: Katie's Google Drive ID is missing!"
 
 # --- TEST 3: SAFETY GATE (Empty Content / Noise Handling) ---
 @pytest.mark.parametrize("bad_input", [
