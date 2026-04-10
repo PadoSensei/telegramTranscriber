@@ -8,10 +8,11 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
-from config import VAULT_CONFIGS
+from config import VAULT_CONFIGS, get_user_config
 from bot_utils import restricted, parse_vault_request, send_large_message
 from transcriber import Transcriber
-from processor import TaskProcessor
+from factory import ManagerFactory
+from state_manager import StateManager
 
 # --- 1. SETUP ---
 load_dotenv()
@@ -23,11 +24,7 @@ logger = logging.getLogger("2ndBrain")
 
 # Initialize Services
 transcriber = Transcriber(model_name="tiny") 
-processor = TaskProcessor()
-
-# Short-term memory to handle follow-up hashtags
-# Structure: { user_id: "Last transcribed or sent text" }
-USER_TRANSCRIPT_CACHE = {}
+state_manager = StateManager()
 
 # --- 2. CORE LOGIC ---
 
@@ -40,7 +37,13 @@ async def process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     user_name = update.effective_user.first_name
-    user_cfg = VAULT_CONFIGS.get(user_id)
+    try:
+        user_cfg_model = get_user_config(user_id)
+        user_cfg = user_cfg_model.dict() # For backward compatibility with existing code
+    except ValueError as e:
+        logger.error(f"Config error for user {user_id}: {e}")
+        await context.bot.send_message(chat_id=chat_id, text="❌ Configuration Error. Please contact admin.")
+        return
 
     # Detect input type
     is_audio = bool(update.message.voice or update.message.audio)
@@ -63,24 +66,24 @@ async def process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if update.message.caption:
                 raw_content = f"{raw_content} {update.message.caption}"
             
-            # Save to memory in case they send a hashtag in the next message
-            USER_TRANSCRIPT_CACHE[user_id] = raw_content
-            logger.info(f"[USER:{user_id}] Transcription saved to cache.")
+            # Save to persistent state in case they send a hashtag in the next message
+            state_manager.set_transcript(user_id, raw_content)
+            logger.info(f"[USER:{user_id}] Transcription saved to state.")
 
         else:
             # It's a text message. Check if it's a "Follow-up Hashtag"
             # Logic: If text starts with '#' and is only one word
             is_single_hashtag = incoming_text.startswith("#") and len(incoming_text.split()) == 1
             
-            if is_single_hashtag and user_id in USER_TRANSCRIPT_CACHE:
-                cached_text = USER_TRANSCRIPT_CACHE[user_id]
+            cached_text = state_manager.get_transcript(user_id)
+            if is_single_hashtag and cached_text:
                 raw_content = f"{cached_text} {incoming_text}"
                 logger.info(f"[USER:{user_id}] FOLLOW-UP: Applying {incoming_text} to cached content.")
                 await status_msg.edit_text(f"🔗 Linking `{incoming_text}` to your last voice note...")
             else:
                 raw_content = incoming_text
-                # Update cache with latest text as well
-                USER_TRANSCRIPT_CACHE[user_id] = raw_content
+                # Update state with latest text as well
+                state_manager.set_transcript(user_id, raw_content)
 
         # Safety check for empty content
         if not raw_content or len(raw_content.strip()) < 2:
@@ -102,26 +105,34 @@ async def process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"[USER:{user_id}] Starting AI Stack...")
         await status_msg.edit_text(f"🚀 Syncing to `{target_proj}`...")
         
-        clean_text, analysis, success = await processor.run_sync_stack(
-            user_id, target_cat, target_proj, raw_content, user_name
+        # Isolated Processor per-request
+        processor = ManagerFactory.get_processor(user_cfg_model)
+        clean_text, analysis, git_success, google_success = await processor.run_sync_stack(
+            target_cat, target_proj, raw_content
         )
 
         # PHASE D: Feedback
-        if success:
-            logger.info(f"[USER:{user_id}] SUCCESS: Vault Updated.")
+        if git_success or google_success:
+            logger.info(f"[USER:{user_id}] SYNC RESULTS: Git={git_success}, Google={google_success}")
             confirm_icon = "🌟" if "#star" in raw_content.lower() else "📥"
             
+            status_text = f"{confirm_icon} *Sync Complete!*\n"
+            status_text += f"✅ GitHub: `{target_proj}`\n" if git_success else "❌ GitHub Sync Failed\n"
+
+            if user_cfg_model.gdrive_doc_id:
+                status_text += "✅ Google Doc: Updated\n" if google_success else "❌ Google Doc Sync Failed\n"
+
             # Send confirmation and transcript
             await context.bot.send_message(
                 chat_id=chat_id, 
-                text=f"{confirm_icon} *Obsidian Updated!*\nSaved to: `{target_proj}`",
+                text=status_text,
                 parse_mode="Markdown"
             )
             await send_large_message(context, chat_id, f"📝 *Content Preview:*\n\n{clean_text}")
             await status_msg.delete()
         else:
-            await status_msg.edit_text("⚠️ Sync finished with errors. Check GitHub logs.")
-            logger.error(f"[USER:{user_id}] FAILURE: Sync finished with errors.")
+            await status_msg.edit_text("⚠️ All sync operations failed. Check logs.")
+            logger.error(f"[USER:{user_id}] FAILURE: Both Git and Google sync failed.")
 
     except Exception as e:
         logger.error(f"[USER:{user_id}] ERROR: {str(e)}", exc_info=True)

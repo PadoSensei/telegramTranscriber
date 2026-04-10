@@ -9,19 +9,18 @@ from config import VAULT_CONFIGS
 logger = logging.getLogger(__name__)
 
 class TaskProcessor:
-    def __init__(self):
-        self.ai = AIEngine()
-        self.google = GoogleManager()
+    def __init__(self, user_config):
+        self.user_cfg = user_config
+        self.ai = AIEngine(api_key=os.getenv("GEMINI_API_KEY"))
+        self.google = GoogleManager(gcp_json_content=user_config.gcp_json_content)
+        self.vault = VaultManager(user_config.repo_url, user_config.token, user_config.username)
 
-    async def run_sync_stack(self, user_id, category, project, text, user_name):
+    async def run_sync_stack(self, category, project, text):
         """
         Coordinates AI transformation and parallel persistence.
-        GitHub is mandatory. Google is optional based on user config.
+        GitHub and Google syncs are decoupled.
         """
-        user_cfg = VAULT_CONFIGS.get(user_id)
-        if not user_cfg:
-            logger.error(f"❌ User {user_id} not found in VAULT_CONFIGS")
-            return None, None, False
+        user_name = self.user_cfg.name
 
         # Determine if we should use STAR story prompt
         is_star = "Star" in category or "STAR_Story_Bank" in category
@@ -30,39 +29,48 @@ class TaskProcessor:
         clean_text, analysis = self.ai.get_structured_output(text, user_name, is_star)
         
         # 2. Setup Persistence Tasks
-        vault = VaultManager(user_cfg["repo_url"], user_cfg["token"], user_cfg["username"])
-        
-        # Check if this specific user has a Google Doc assigned (e.g., Katie=Yes, Paddy=No)
-        has_google = user_cfg.get("gdrive_doc_id") is not None
-        
+        has_google = self.user_cfg.gdrive_doc_id is not None
         loop = asyncio.get_running_loop()
         
-        # Start with GitHub (Always required)
-        tasks = [
-            loop.run_in_executor(None, vault.push_to_obsidian, category, project, clean_text, analysis)
-        ]
+        # Start GitHub sync (Always required)
+        git_task = loop.run_in_executor(None, self.vault.push_to_obsidian, category, project, clean_text, analysis)
 
-        # Add Google Sync ONLY if the user has a configured Doc ID
+        # Start Google sync (Optional)
+        google_task = None
         if has_google:
             logger.info(f"🔗 Google Sync enabled for {user_name}")
-            tasks.append(self.google.sync_to_doc(user_cfg, project, clean_text, analysis))
+            google_task = self.google.sync_to_doc(self.user_cfg.gdrive_doc_id, project, clean_text, analysis)
         else:
             logger.info(f"⏭️ Skipping Google Sync for {user_name} (No Doc ID)")
 
-        try:
-            # Run tasks in parallel
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # evaluate GitHub Success
-            git_success = results[0] is True
-            
-            # evaluate Google Success (if not configued, default to True so it doesn't block)
-            google_success = True
-            if has_google:
-                google_success = results[1] is True
-            
-            return clean_text, analysis, (git_success and google_success)
-            
-        except Exception as e:
-            logger.error(f"❌ Critical error in sync stack for {user_name}: {e}")
-            return clean_text, analysis, False
+        # 3. Parallel Sync Execution (Restored for performance)
+        # We use gather with return_exceptions=True to ensure one failure doesn't stop the other
+        tasks = [git_task]
+        if google_task:
+            tasks.append(google_task)
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 4. Independent Success Evaluation
+        git_success = False
+        google_success = True # Default to True if not configured
+
+        # Evaluate Git Result (always index 0)
+        if isinstance(results[0], Exception):
+            logger.error(f"❌ GitHub Sync error for {user_name}: {results[0]}")
+        else:
+            git_success = results[0]
+            if not git_success:
+                logger.error(f"❌ GitHub Sync failed for {user_name}")
+
+        # Evaluate Google Result (index 1 if exists)
+        if google_task:
+            if isinstance(results[1], Exception):
+                logger.error(f"❌ Google Sync error for {user_name}: {results[1]}")
+                google_success = False
+            else:
+                google_success = results[1]
+                if not google_success:
+                    logger.error(f"❌ Google Sync failed for {user_name}")
+
+        return clean_text, analysis, git_success, google_success

@@ -42,11 +42,44 @@ class Transcriber:
     def _sync_transcribe(self, file_path: str):
         """
         Synchronous wrapper for the heavy Whisper CPU work.
+        Includes hallucination filtering for common 'tiny' model artifacts.
         """
         try:
             logger.info(f"🎙️ [Whisper] Transcribing: {file_path}")
             result = self.model.transcribe(file_path, fp16=False)
-            return result.get("text", "").strip()
+            text = result.get("text", "").strip()
+
+            # Hallucination Filtering
+            # Whisper 'tiny' often outputs these on silence or static
+            hallucinations = [
+                "Thank you for watching",
+                "Visit us",
+                "Please subscribe",
+                "Thanks for watching",
+                "Subtitles by",
+                "Amara.org",
+                "you", # Sometimes just repeats 'you'
+                "."
+            ]
+
+            # 1. Exact or fuzzy matches for common hallucinations
+            cleaned_text = text
+            for h in hallucinations:
+                if h.lower() in text.lower() and len(text) < len(h) + 10:
+                    logger.warning(f"⚠️ Hallucination detected and filtered: '{text}'")
+                    return ""
+
+            # 2. Check for extremely high repetition (e.g., "you you you you")
+            words = text.split()
+            if len(words) > 5 and len(set(words)) / len(words) < 0.3:
+                logger.warning(f"⚠️ High repetition hallucination detected: '{text}'")
+                return ""
+
+            # 3. Short capture check
+            if len(text) < 2:
+                return ""
+
+            return text
         except Exception as e:
             logger.error(f"❌ Whisper Error: {e}")
             return ""
