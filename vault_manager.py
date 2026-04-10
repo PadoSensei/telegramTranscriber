@@ -72,6 +72,9 @@ class VaultManager:
             with open(file_path, 'a', encoding='utf-8') as f:
                 f.write(NoteTemplate.format_entry(clean_transcript, analysis_output, is_star=is_star))
 
+            # 5.5 DISCOVERY MODE: Scan for new folders to suggest hashtags
+            self._discover_new_folders(repo)
+
             # 6. GIT PUSH: Commit and sync back to GitHub
             repo.git.add(A=True)
             commit_msg = f"Capture: {target_project} via 2ndBrain Bot"
@@ -86,10 +89,37 @@ class VaultManager:
         except Exception as e:
             logger.error(f"[USER:{self.username}] ❌ Vault Sync Error: {str(e)}")
             return False
-            
         finally:
-            # 7. FINAL CLEANUP: Critical for Railway to prevent "Disk Full" errors
-            if os.path.exists(self.temp_dir):
+            self._cleanup()
+
+    def _discover_new_folders(self, repo):
+        """
+        Scans the repository for folders and suggests new hashtags if they aren't in mapping.
+        """
+        try:
+            ignore_dirs = {'.git', '.obsidian', '.trash', 'attachments'}
+            found_folders = []
+            for root, dirs, files in os.walk(self.temp_dir):
+                # Filter out hidden/ignored directories
+                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ignore_dirs]
+                for d in dirs:
+                    # We want the relative path from the repo root
+                    rel_path = os.path.relpath(os.path.join(root, d), self.temp_dir)
+                    found_folders.append(rel_path)
+
+            # Internal mapping update: Update bot_state.json with discovered folders
+            from state_manager import StateManager
+            state = StateManager()
+            state.set_discovered_folders(self.username, found_folders)
+
+            logger.info(f"[USER:{self.username}] Discovery Mode found {len(found_folders)} folders. Mapping updated.")
+
+        except Exception as e:
+            logger.error(f"Discovery Mode failed: {e}")
+
+    def _cleanup(self):
+        # 7. FINAL CLEANUP: Critical for Railway to prevent "Disk Full" errors
+        if os.path.exists(self.temp_dir):
                 try:
                     shutil.rmtree(self.temp_dir)
                     logger.info(f"[USER:{self.username}] Temporary workspace cleaned.")

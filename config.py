@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from schema import UserConfig
 
 load_dotenv()
 
@@ -85,3 +86,22 @@ VAULT_CONFIGS = {
 # Keep this list dynamic for the @restricted security decorator in main.py
 ALLOWED_IDS = list(VAULT_CONFIGS.keys())
 
+def get_user_config(user_id: int) -> UserConfig:
+    """
+    Retrieves and validates user configuration using Pydantic.
+    """
+    cfg_dict = VAULT_CONFIGS.get(user_id)
+    if not cfg_dict:
+        raise ValueError(f"User {user_id} not authorized.")
+
+    # Create a copy to avoid mutating the global VAULT_CONFIGS directly before validation
+    cfg_to_validate = cfg_dict.copy()
+
+    # We can also inject per-user GCP content from env if it's missing in the dict
+    user_name = cfg_to_validate.get("name")
+    if user_name and not cfg_to_validate.get("gcp_json_content"):
+        # Fallback to a naming convention or a specific env var if needed
+        env_key = f"{user_name.upper()}_GCP_JSON"
+        cfg_to_validate["gcp_json_content"] = os.getenv(env_key)
+
+    return UserConfig(**cfg_to_validate)
