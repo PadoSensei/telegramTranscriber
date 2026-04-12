@@ -24,6 +24,7 @@ We are successfully transitioning the "2ndBrain" orchestrator from a brittle pro
 - **Stateless Manager Factory:** Refactored `TaskProcessor` and `ManagerFactory` to ensure per-request isolation. No more shared state between users.
 - **Soft-Fail Resiliency:** Decoupled GitHub and Google syncs. GitHub success now confirms the update even if Google fails.
 - **CI/CD Quality Gate:** Added GitHub Actions for automated linting and testing.
+- **Python 3.12 Compatibility Patch:** Modernized the AI stack by updating Whisper and hardening CI with pinned build tools.
 - **Project Documentation:** Created root README.md with full project description and architecture overview.
 
 ## 📝 Mentor Notes

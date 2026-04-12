@@ -41,7 +41,8 @@
 | **Phase 2** | Persistent State Management (JSON) | ✅ Done |
 | **Phase 3** | Transcriber Hallucination Filtering | ✅ Done |
 | **Phase 4** | Manager Factory & Tenant Isolation | ✅ Done |
-| **Phase 5** | Discovery Mode & Sync Decoupling | 👷 In Progress |
+| **Phase 5** | Python 3.12 Compatibility Patch | ✅ Done |
+| **Phase 6** | Discovery Mode & Sync Decoupling | 👷 In Progress |
 
 ---
 

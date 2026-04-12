@@ -20,10 +20,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        # Install setuptools, wheel, and numpy first to avoid pkg_resources error with older whisper on Python 3.12
+        # Harden CI: Pin setuptools and pre-install wheel/numpy for Python 3.12 compatibility
         pip install setuptools==69.5.1 wheel numpy
-        # Use no-build-isolation for whisper to use the already installed setuptools
-        pip install --no-build-isolation openai-whisper==20231117
         pip install -r requirements.txt
         pip install pytest pytest-asyncio pytest-mock flake8
 
