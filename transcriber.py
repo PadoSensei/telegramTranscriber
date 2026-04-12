@@ -7,6 +7,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
+class HallucinationError(Exception):
+    """Raised when Whisper returns a common hallucination or gibberish."""
+    pass
+
 class Transcriber:
     def __init__(self, model_name="tiny", device="cpu"):
         """
@@ -49,8 +53,7 @@ class Transcriber:
             result = self.model.transcribe(file_path, fp16=False)
             text = result.get("text", "").strip()
 
-            # Hallucination Filtering
-            # Whisper 'tiny' often outputs these on silence or static
+            # HEURISTIC_BLACKLIST: Whisper 'tiny' often outputs these on silence or static
             hallucinations = [
                 "Thank you for watching",
                 "Visit us",
@@ -58,25 +61,30 @@ class Transcriber:
                 "Thanks for watching",
                 "Subtitles by",
                 "Amara.org",
-                "you", # Sometimes just repeats 'you'
-                "."
+                "you",
+                ".",
+                "Bye.",
+                "Enjoy.",
+                "God bless.",
+                "Like and subscribe.",
+                "Visit us, please"
             ]
 
             # 1. Exact or fuzzy matches for common hallucinations
-            cleaned_text = text
             for h in hallucinations:
-                if h.lower() in text.lower() and len(text) < len(h) + 10:
+                if h.lower() in text.lower() and len(text) < len(h) + 15:
                     logger.warning(f"⚠️ Hallucination detected and filtered: '{text}'")
-                    return ""
+                    raise HallucinationError(f"Hallucination detected: {text}")
 
             # 2. Check for extremely high repetition (e.g., "you you you you")
             words = text.split()
             if len(words) > 5 and len(set(words)) / len(words) < 0.3:
                 logger.warning(f"⚠️ High repetition hallucination detected: '{text}'")
-                return ""
+                raise HallucinationError(f"Repetitive hallucination detected: {text}")
 
             # 3. Short capture check
-            if len(text) < 2:
+            if len(text.strip()) < 3:
+                logger.info(f"🔈 Captured noise or too short: '{text}'")
                 return ""
 
             return text

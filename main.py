@@ -10,7 +10,7 @@ from telegram.request import HTTPXRequest
 
 from config import VAULT_CONFIGS, get_user_config
 from bot_utils import restricted, parse_vault_request, send_large_message
-from transcriber import Transcriber
+from transcriber import Transcriber, HallucinationError
 from factory import ManagerFactory
 from state_manager import StateManager
 
@@ -25,6 +25,7 @@ logger = logging.getLogger("2ndBrain")
 # Initialize Services
 transcriber = Transcriber(model_name="tiny") 
 state_manager = StateManager()
+processor = ManagerFactory.get_processor()
 
 # --- 2. CORE LOGIC ---
 
@@ -59,8 +60,12 @@ async def process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # PHASE A: Content Acquisition
         if is_audio:
             logger.info(f"[USER:{user_id}] Downloading/Transcribing audio...")
-            temp_path = await transcriber.get_voice_file(update, context)
-            raw_content = await transcriber.transcribe(temp_path)
+            try:
+                temp_path = await transcriber.get_voice_file(update, context)
+                raw_content = await transcriber.transcribe(temp_path)
+            except HallucinationError:
+                await status_msg.edit_text("I caught some background noise, but nothing clear enough to save.")
+                return
             
             # If user included a caption (text with the audio), append it
             if update.message.caption:
@@ -105,23 +110,20 @@ async def process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"[USER:{user_id}] Starting AI Stack...")
         await status_msg.edit_text(f"🚀 Syncing to `{target_proj}`...")
         
-        # Isolated Processor per-request
-        processor = ManagerFactory.get_processor(user_cfg_model)
+        # Unified stateless processor handling the request
         clean_text, analysis, git_success, google_success = await processor.run_sync_stack(
-            target_cat, target_proj, raw_content
+            user_cfg_model, target_cat, target_proj, raw_content
         )
 
         # PHASE D: Feedback
-        if git_success or google_success:
-            logger.info(f"[USER:{user_id}] SYNC RESULTS: Git={git_success}, Google={google_success}")
-            confirm_icon = "🌟" if "#star" in raw_content.lower() else "📥"
+        if git_success:
+            logger.info(f"[USER:{user_id}] SYNC SUCCESS: GitHub updated.")
+
+            # Use exact wording requested for soft-fail
+            status_text = "🌟 *Obsidian Updated!*"
+            if user_cfg_model.gdrive_doc_id and not google_success:
+                status_text += "\n(⚠️ Google Sync failed)"
             
-            status_text = f"{confirm_icon} *Sync Complete!*\n"
-            status_text += f"✅ GitHub: `{target_proj}`\n" if git_success else "❌ GitHub Sync Failed\n"
-
-            if user_cfg_model.gdrive_doc_id:
-                status_text += "✅ Google Doc: Updated\n" if google_success else "❌ Google Doc Sync Failed\n"
-
             # Send confirmation and transcript
             await context.bot.send_message(
                 chat_id=chat_id, 
