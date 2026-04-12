@@ -1,4 +1,5 @@
 import os
+import sys
 import logging
 import asyncio
 from datetime import datetime
@@ -21,6 +22,41 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - [%(name)s] - %(message)s'
 )
 logger = logging.getLogger("2ndBrain")
+
+def system_check():
+    """
+    Validates infrastructure, environment variables, and user configurations at boot.
+    Fails fast if critical components are missing or misconfigured.
+    """
+    logger.info("🔍 Running System Boot Diagnostics...")
+
+    # 1. Infrastructure Checks
+    critical_env_vars = ["TELEGRAM_BOT_TOKEN", "GEMINI_API_KEY"]
+    missing_vars = [var for var in critical_env_vars if not os.getenv(var)]
+    if missing_vars:
+        logger.critical(f"❌ Missing critical environment variables: {', '.join(missing_vars)}")
+        sys.exit(1)
+
+    # 2. Dependency Checks (Smoke Test)
+    try:
+        import fasteners
+        import pydantic
+        import whisper
+        logger.info("✅ Core dependencies verified (fasteners, pydantic, whisper)")
+    except ImportError as e:
+        logger.critical(f"❌ Dependency check failed: {e}")
+        sys.exit(1)
+
+    # 3. User Schema Validation
+    try:
+        for user_id, cfg in VAULT_CONFIGS.items():
+            get_user_config(user_id)
+            logger.info(f"✅ Configuration for user {cfg.get('name')} (ID: {user_id}) is valid.")
+    except Exception as e:
+        logger.critical(f"❌ User Schema Validation failed: {e}")
+        sys.exit(1)
+
+    logger.info("🚀 System Diagnostics Passed. Bot is ready to boot.")
 
 # Initialize Services
 transcriber = Transcriber(model_name="tiny") 
@@ -71,6 +107,14 @@ async def process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if update.message.caption:
                 raw_content = f"{raw_content} {update.message.caption}"
             
+            # BI-DIRECTIONAL CACHE: Check for Primed Tag
+            pending_tag = state_manager.get_pending_tag(user_id)
+            if pending_tag:
+                logger.info(f"[USER:{user_id}] PRIMED: Applying pending tag {pending_tag} to new audio.")
+                raw_content = f"{raw_content} {pending_tag}"
+                state_manager.clear_pending_tag(user_id)
+                await status_msg.edit_text(f"🔗 Primed tag `{pending_tag}` applied.")
+
             # Save to persistent state in case they send a hashtag in the next message
             state_manager.set_transcript(user_id, raw_content)
             logger.info(f"[USER:{user_id}] Transcription saved to state.")
@@ -81,10 +125,18 @@ async def process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
             is_single_hashtag = incoming_text.startswith("#") and len(incoming_text.split()) == 1
             
             cached_text = state_manager.get_transcript(user_id)
-            if is_single_hashtag and cached_text:
-                raw_content = f"{cached_text} {incoming_text}"
-                logger.info(f"[USER:{user_id}] FOLLOW-UP: Applying {incoming_text} to cached content.")
-                await status_msg.edit_text(f"🔗 Linking `{incoming_text}` to your last voice note...")
+            if is_single_hashtag:
+                if cached_text:
+                    # Case 1: Tag sent AFTER audio
+                    raw_content = f"{cached_text} {incoming_text}"
+                    logger.info(f"[USER:{user_id}] FOLLOW-UP: Applying {incoming_text} to cached content.")
+                    await status_msg.edit_text(f"🔗 Linking `{incoming_text}` to your last voice note...")
+                else:
+                    # Case 2: Tag sent BEFORE audio (Priming)
+                    state_manager.set_pending_tag(user_id, incoming_text)
+                    logger.info(f"[USER:{user_id}] PRIMING: User {user_id} primed {incoming_text}")
+                    await status_msg.edit_text(f"⏳ Tag `{incoming_text}` primed. Send your voice note now!")
+                    return # Exit early, we wait for audio
             else:
                 raw_content = incoming_text
                 # Update state with latest text as well
@@ -142,6 +194,9 @@ async def process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- 3. ENTRY POINT ---
 if __name__ == '__main__':
+    # Run boot diagnostics before starting the bot
+    system_check()
+
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN not found in environment!")

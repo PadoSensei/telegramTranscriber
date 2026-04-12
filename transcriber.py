@@ -50,6 +50,18 @@ class Transcriber:
         """
         try:
             logger.info(f"🎙️ [Whisper] Transcribing: {file_path}")
+
+            # Senior Logic: Get actual duration using os.path.getsize as a proxy if ffmpeg is missing
+            # or use a more reliable method if possible.
+            try:
+                file_size = os.path.getsize(file_path)
+            except OSError:
+                file_size = 0
+
+            # Rough proxy: 1 second of .oga (Opus) is roughly 2-4 KB.
+            # If > 10KB, it's likely > 3 seconds.
+            is_long_audio = file_size > 10000
+
             result = self.model.transcribe(file_path, fp16=False)
             text = result.get("text", "").strip()
 
@@ -67,7 +79,11 @@ class Transcriber:
                 "Enjoy.",
                 "God bless.",
                 "Like and subscribe.",
-                "Visit us, please"
+                "Visit us, please",
+                "Thank you for the support.",
+                "The end.",
+                "Subtitles by",
+                "Thanks for watching"
             ]
 
             # 1. Exact or fuzzy matches for common hallucinations
@@ -76,7 +92,15 @@ class Transcriber:
                     logger.warning(f"⚠️ Hallucination detected and filtered: '{text}'")
                     raise HallucinationError(f"Hallucination detected: {text}")
 
-            # 2. Check for extremely high repetition (e.g., "you you you you")
+            # 2. Senior Logic: Common single-word verbs in longer audio are likely hallucinations
+            common_verbs = ["you", "go", "is", "the", "and", "do", "get", "can"]
+            words = text.split()
+            if len(words) == 1 and words[0].lower().strip(".,!?") in common_verbs:
+                if is_long_audio:
+                    logger.warning(f"⚠️ Single-verb hallucination detected (Size: {file_size}): '{text}'")
+                    raise HallucinationError(f"Single-verb hallucination detected: {text}")
+
+            # 3. Check for extremely high repetition (e.g., "you you you you")
             words = text.split()
             if len(words) > 5 and len(set(words)) / len(words) < 0.3:
                 logger.warning(f"⚠️ High repetition hallucination detected: '{text}'")

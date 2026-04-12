@@ -4,21 +4,21 @@ import asyncio
 from vault_manager import VaultManager
 from google_manager import GoogleManager
 from ai_engine import AIEngine
-from config import VAULT_CONFIGS
 
 logger = logging.getLogger(__name__)
 
 class TaskProcessor:
     def __init__(self):
-        # Long-lived global service clients (Stateless)
+        # AI Engine can be shared as it's typically a thread-safe client or stateless
         self.ai = AIEngine(api_key=os.getenv("GEMINI_API_KEY"))
 
     async def run_sync_stack(self, user_cfg, category, project, text):
         """
         Coordinates AI transformation and parallel persistence.
-        GitHub and Google syncs are decoupled and isolated per-request.
+        Ensures absolute tenant isolation by instantiating Managers locally.
         """
         user_name = user_cfg.name
+        logger.info(f"🔄 [USER:{user_name}] Starting sync stack for project: {project}")
 
         # Determine if we should use STAR story prompt
         is_star = "Star" in category or "STAR_Story_Bank" in category
@@ -26,7 +26,8 @@ class TaskProcessor:
         # 1. AI Transformation (Gemini 2.0 Flash)
         clean_text, analysis = self.ai.get_structured_output(text, user_name, is_star)
         
-        # 2. Local Service Instantiation (Isolated per request)
+        # 2. Local Service Instantiation (Isolated per request - Factory Pattern)
+        # These are local variables, ensuring they are not shared between concurrent requests.
         vault = VaultManager(user_cfg.repo_url, user_cfg.token, user_cfg.username)
         google = GoogleManager(gcp_json_content=user_cfg.gcp_json_content)
 
@@ -45,15 +46,14 @@ class TaskProcessor:
         else:
             logger.info(f"⏭️ Skipping Google Sync for {user_name} (No Doc ID)")
 
-        # 3. Parallel Sync Execution (Restored for performance)
-        # We use gather with return_exceptions=True to ensure one failure doesn't stop the other
+        # 4. Parallel Sync Execution
         tasks = [git_task]
         if google_task:
             tasks.append(google_task)
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # 4. Independent Success Evaluation
+        # 5. Independent Success Evaluation
         git_success = False
         google_success = True # Default to True if not configured
 
@@ -62,8 +62,6 @@ class TaskProcessor:
             logger.error(f"❌ GitHub Sync error for {user_name}: {results[0]}")
         else:
             git_success = results[0]
-            if not git_success:
-                logger.error(f"❌ GitHub Sync failed for {user_name}")
 
         # Evaluate Google Result (index 1 if exists)
         if google_task:
@@ -72,7 +70,5 @@ class TaskProcessor:
                 google_success = False
             else:
                 google_success = results[1]
-                if not google_success:
-                    logger.error(f"❌ Google Sync failed for {user_name}")
 
         return clean_text, analysis, git_success, google_success
