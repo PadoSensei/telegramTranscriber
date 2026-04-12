@@ -20,8 +20,14 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
+        # Install setuptools first to avoid pkg_resources error with older whisper
+        pip install setuptools==69.5.1 wheel
         pip install -r requirements.txt
         pip install pytest pytest-asyncio pytest-mock flake8
+
+    - name: Import Sanity Check
+      run: |
+        python -c "import main; import state_manager; import processor; import transcriber; print('✅ All modules importable')"
 
     - name: Lint with flake8
       run: |
