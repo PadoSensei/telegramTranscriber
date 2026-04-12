@@ -23,6 +23,8 @@ We are successfully transitioning the "2ndBrain" orchestrator from a brittle pro
 - **Whisper Hallucination Filtering:** Successfully implemented a heuristic blacklist and custom `HallucinationError` to catch and block "Ghost Notes."
 - **Stateless Manager Factory:** Refactored `TaskProcessor` and `ManagerFactory` to ensure per-request isolation. No more shared state between users.
 - **Soft-Fail Resiliency:** Decoupled GitHub and Google syncs. GitHub success now confirms the update even if Google fails.
+- **CI/CD Quality Gate:** Added GitHub Actions for automated linting and testing.
+- **Project Documentation:** Created root README.md with full project description and architecture overview.
 
 ## 📝 Mentor Notes
 - *Architecture:* Moving towards a "Stateless Request" model. Every message should carry enough context (or link to persistent state) to be processed independently.
