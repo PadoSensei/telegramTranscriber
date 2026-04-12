@@ -24,3 +24,7 @@ Added a hallucination filter.
 ### 5. Independent Sync (Fault Tolerance)
 We decoupled GitHub and Google syncs.
 **Lesson:** A failure in an optional secondary system (Google Docs) should never block a primary system (GitHub Vault). Always use try/except blocks to isolate external API risks.
+
+### 6. Dependency Modernization (Python 3.12)
+We navigated the "Dependency Hell" of Python 3.12 removing legacy build tools.
+**Lesson:** Living on the "Bleeding Edge" of language features requires keeping your library pins moving forward. When pinned versions (like Whisper) break due to internal tool removals (like `pkg_resources`), updating to a version that supports the new environment is the most stable path. Additionally, pinning build-time tools like `setuptools` in CI ensures that environmental shifts don't cause transient failures.
