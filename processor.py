@@ -9,18 +9,16 @@ from config import VAULT_CONFIGS
 logger = logging.getLogger(__name__)
 
 class TaskProcessor:
-    def __init__(self, user_config):
-        self.user_cfg = user_config
+    def __init__(self):
+        # Long-lived global service clients (Stateless)
         self.ai = AIEngine(api_key=os.getenv("GEMINI_API_KEY"))
-        self.google = GoogleManager(gcp_json_content=user_config.gcp_json_content)
-        self.vault = VaultManager(user_config.repo_url, user_config.token, user_config.username)
 
-    async def run_sync_stack(self, category, project, text):
+    async def run_sync_stack(self, user_cfg, category, project, text):
         """
         Coordinates AI transformation and parallel persistence.
-        GitHub and Google syncs are decoupled.
+        GitHub and Google syncs are decoupled and isolated per-request.
         """
-        user_name = self.user_cfg.name
+        user_name = user_cfg.name
 
         # Determine if we should use STAR story prompt
         is_star = "Star" in category or "STAR_Story_Bank" in category
@@ -28,18 +26,22 @@ class TaskProcessor:
         # 1. AI Transformation (Gemini 2.0 Flash)
         clean_text, analysis = self.ai.get_structured_output(text, user_name, is_star)
         
-        # 2. Setup Persistence Tasks
-        has_google = self.user_cfg.gdrive_doc_id is not None
+        # 2. Local Service Instantiation (Isolated per request)
+        vault = VaultManager(user_cfg.repo_url, user_cfg.token, user_cfg.username)
+        google = GoogleManager(gcp_json_content=user_cfg.gcp_json_content)
+
+        # 3. Setup Persistence Tasks
+        has_google = user_cfg.gdrive_doc_id is not None
         loop = asyncio.get_running_loop()
         
         # Start GitHub sync (Always required)
-        git_task = loop.run_in_executor(None, self.vault.push_to_obsidian, category, project, clean_text, analysis)
+        git_task = loop.run_in_executor(None, vault.push_to_obsidian, category, project, clean_text, analysis)
 
         # Start Google sync (Optional)
         google_task = None
         if has_google:
             logger.info(f"🔗 Google Sync enabled for {user_name}")
-            google_task = self.google.sync_to_doc(self.user_cfg.gdrive_doc_id, project, clean_text, analysis)
+            google_task = google.sync_to_doc(user_cfg.gdrive_doc_id, project, clean_text, analysis, user_name)
         else:
             logger.info(f"⏭️ Skipping Google Sync for {user_name} (No Doc ID)")
 

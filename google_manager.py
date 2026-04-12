@@ -44,7 +44,7 @@ class GoogleManager:
             logger.error(f"❌ Failed to initialize Google Docs Service: {e}")
             return None
 
-    async def sync_to_doc(self, doc_id, title, content, analysis):
+    async def sync_to_doc(self, doc_id, title, content, analysis, user_name="Unknown"):
         """Appends formatted STAR stories or research to a Google Doc."""
         if not doc_id:
             return False
@@ -78,7 +78,7 @@ class GoogleManager:
                 body={'requests': requests}
             ).execute()
             
-            logger.info(f"✅ Google Doc {doc_id} updated for {user_cfg.get('name')}")
+            logger.info(f"✅ Google Doc {doc_id} updated for {user_name}")
             return True
 
         except Exception as e:

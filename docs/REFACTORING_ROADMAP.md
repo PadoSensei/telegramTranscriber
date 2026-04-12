@@ -39,9 +39,9 @@
 | :--- | :--- | :--- |
 | **Phase 1** | Pydantic Schema Enforcement | ✅ Done |
 | **Phase 2** | Persistent State Management (JSON) | ✅ Done |
-| **Phase 3** | Transcriber Hallucination Filtering | 👷 In Progress |
-| **Phase 4** | Manager Factory & Tenant Isolation | ⏳ Pending |
-| **Phase 5** | Discovery Mode & Sync Decoupling | ⏳ Pending |
+| **Phase 3** | Transcriber Hallucination Filtering | ✅ Done |
+| **Phase 4** | Manager Factory & Tenant Isolation | ✅ Done |
+| **Phase 5** | Discovery Mode & Sync Decoupling | 👷 In Progress |
 
 ---
 
