@@ -58,9 +58,6 @@ def system_check():
 
     logger.info("🚀 System Diagnostics Passed. Bot is ready to boot.")
 
-# Run boot diagnostics before initializing services
-system_check()
-
 # Initialize Services
 transcriber = Transcriber(model_name="tiny") 
 state_manager = StateManager()
@@ -197,6 +194,9 @@ async def process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- 3. ENTRY POINT ---
 if __name__ == '__main__':
+    # Run boot diagnostics before starting the bot
+    system_check()
+
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN not found in environment!")
