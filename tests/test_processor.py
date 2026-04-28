@@ -10,29 +10,36 @@ def mock_user_config():
         repo_url="https://github.com/mock/repo",
         token="mock_token",
         username="katieOD",
-        gdrive_doc_id="mock_doc_id",
+        gdrive_doc_id="1-mock-doc-id-longer-than-20-chars",
         category_map={"Star": "01_Projects/Bloom_Prep/STAR_Story_Bank"}
     )
 
 @pytest.fixture
-def processor(mocker, mock_user_config):
+def processor(mocker):
     # Mock components to isolate TaskProcessor logic
     mocker.patch("processor.AIEngine")
     mocker.patch("processor.GoogleManager")
     mocker.patch("processor.VaultManager")
-    return TaskProcessor(mock_user_config)
+    return TaskProcessor()
 
 @pytest.mark.asyncio
-async def test_run_sync_stack_success(processor, mocker):
+async def test_run_sync_stack_success(processor, mock_user_config, mocker):
     """Verifies that for a user with Google enabled, both syncs are called."""
     # 1. Setup Mocks
-    processor.ai.get_structured_output.return_value = ("Clean Story", "Analysis")
+    processor.ai.get_structured_output = AsyncMock(return_value=("Clean Story", "Analysis"))
     
-    processor.vault.push_to_obsidian.return_value = True
-    processor.google.sync_to_doc = mocker.AsyncMock(return_value=True)
+    # We need to mock the classes that are instantiated locally in run_sync_stack
+    mock_vault_cls = mocker.patch("processor.VaultManager")
+    mock_vault = mock_vault_cls.return_value
+    mock_vault.push_to_obsidian.return_value = True
+
+    mock_google_cls = mocker.patch("processor.GoogleManager")
+    mock_google = mock_google_cls.return_value
+    mock_google.sync_to_doc = AsyncMock(return_value=True)
 
     # 2. Execute
     clean, analysis, git_success, google_success = await processor.run_sync_stack(
+        user_cfg=mock_user_config,
         category="STAR_Story_Bank", 
         project="Tullamore_Launch", 
         text="I did things"
@@ -41,11 +48,11 @@ async def test_run_sync_stack_success(processor, mocker):
     # 3. Assertions
     assert git_success is True
     assert google_success is True
-    processor.vault.push_to_obsidian.assert_called_once()
-    processor.google.sync_to_doc.assert_called_once()
+    mock_vault.push_to_obsidian.assert_called_once()
+    mock_google.sync_to_doc.assert_called_once()
 
 @pytest.mark.asyncio
-async def test_run_sync_stack_paddy_no_google(mocker):
+async def test_run_sync_stack_paddy_no_google(processor, mocker):
     """Verifies that for a user without Google, only GitHub is called."""
     paddy_config = UserConfig(
         name="Paddy",
@@ -56,17 +63,19 @@ async def test_run_sync_stack_paddy_no_google(mocker):
         category_map={"Inbox": "00_Inbox"}
     )
     
-    mocker.patch("processor.AIEngine")
-    mocker.patch("processor.GoogleManager")
-    mocker.patch("processor.VaultManager")
+    processor.ai.get_structured_output = AsyncMock(return_value=("Paddy Clean", "Analysis"))
     
-    processor = TaskProcessor(paddy_config)
-    processor.ai.get_structured_output.return_value = ("Paddy Clean", "Analysis")
-    processor.vault.push_to_obsidian.return_value = True
-    processor.google.sync_to_doc = mocker.AsyncMock(return_value=True)
+    mock_vault_cls = mocker.patch("processor.VaultManager")
+    mock_vault = mock_vault_cls.return_value
+    mock_vault.push_to_obsidian.return_value = True
+
+    mock_google_cls = mocker.patch("processor.GoogleManager")
+    mock_google = mock_google_cls.return_value
+    mock_google.sync_to_doc = AsyncMock(return_value=True)
 
     # 2. Execute
     _, _, git_success, google_success = await processor.run_sync_stack(
+        user_cfg=paddy_config,
         category="00_Inbox", 
         project="Testing", 
         text="Hello"
@@ -75,5 +84,5 @@ async def test_run_sync_stack_paddy_no_google(mocker):
     # 3. Assertions
     assert git_success is True
     assert google_success is True # Defaults to True when no google sync is configured
-    processor.vault.push_to_obsidian.assert_called_once()
-    processor.google.sync_to_doc.assert_not_called()
+    mock_vault.push_to_obsidian.assert_called_once()
+    mock_google.sync_to_doc.assert_not_called()

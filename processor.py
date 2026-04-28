@@ -24,7 +24,7 @@ class TaskProcessor:
         is_star = "Star" in category or "STAR_Story_Bank" in category
         
         # 1. AI Transformation (Gemini 2.0 Flash)
-        clean_text, analysis = self.ai.get_structured_output(text, user_name, is_star)
+        clean_text, analysis = await self.ai.get_structured_output(text, user_name, is_star)
         
         # 2. Local Service Instantiation (Isolated per request - Factory Pattern)
         # These are local variables, ensuring they are not shared between concurrent requests.

@@ -1,4 +1,5 @@
 import os
+import asyncio
 import logging
 import json
 from datetime import datetime
@@ -44,43 +45,51 @@ class GoogleManager:
             logger.error(f"❌ Failed to initialize Google Docs Service: {e}")
             return None
 
+    def _sync_to_doc_blocking(self, doc_id, title, content, analysis, user_name):
+        """Blocking implementation of Google Docs update."""
+        service = self._get_service()
+        if not service:
+            return False
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        # Formatting the NotebookLM-friendly entry
+        entry_header = f"\n\n--- 🌟 NEW {title.upper()} ENTRY: {timestamp} ---\n"
+        full_text = (
+            f"{entry_header}\n"
+            f"{content}\n\n"
+            f"💡 ANALYSIS & ACTION ITEMS:\n{analysis}\n"
+            f"{'='*40}\n"
+        )
+
+        requests = [{
+            'insertText': {
+                'location': {'index': 1},
+                'text': full_text
+            }
+        }]
+
+        # Batch update for reliable appending
+        service.documents().batchUpdate(
+            documentId=doc_id,
+            body={'requests': requests}
+        ).execute()
+
+        logger.info(f"✅ Google Doc {doc_id} updated for {user_name}")
+        return True
+
     async def sync_to_doc(self, doc_id, title, content, analysis, user_name="Unknown"):
-        """Appends formatted STAR stories or research to a Google Doc."""
+        """Appends formatted STAR stories or research to a Google Doc (Async wrapper)."""
         if not doc_id:
             return False
 
         try:
-            service = self._get_service()
-            if not service: 
-                return False
-
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-            
-            # Formatting the NotebookLM-friendly entry
-            entry_header = f"\n\n--- 🌟 NEW {title.upper()} ENTRY: {timestamp} ---\n"
-            full_text = (
-                f"{entry_header}\n"
-                f"{content}\n\n"
-                f"💡 ANALYSIS & ACTION ITEMS:\n{analysis}\n"
-                f"{'='*40}\n"
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                None,
+                self._sync_to_doc_blocking,
+                doc_id, title, content, analysis, user_name
             )
-
-            requests = [{
-                'insertText': {
-                    'location': {'index': 1}, 
-                    'text': full_text
-                }
-            }]
-
-            # Batch update for reliable appending
-            service.documents().batchUpdate(
-                documentId=doc_id, 
-                body={'requests': requests}
-            ).execute()
-            
-            logger.info(f"✅ Google Doc {doc_id} updated for {user_name}")
-            return True
-
         except Exception as e:
             logger.error(f"❌ Google Docs Sync Error: {e}")
             return False

@@ -34,15 +34,15 @@ class AIEngine:
         wait=wait_random_exponential(min=1, max=60),
         stop=stop_after_attempt(6)
     )
-    def generate(self, prompt):
-        response = self.model.generate_content(prompt)
+    async def generate(self, prompt):
+        response = await self.model.generate_content_async(prompt)
         return response.text
 
-    def get_structured_output(self, text, user_name, is_star=False):
+    async def get_structured_output(self, text, user_name, is_star=False):
         prompt_template = STAR_PROMPT if is_star else GENERAL_PROMPT
         prompt = prompt_template.format(user_name=user_name, content=text)
         
-        full_response = self.generate(prompt)
+        full_response = await self.generate(prompt)
         if "---ANALYSIS_SPLIT---" in full_response:
             return full_response.split("---ANALYSIS_SPLIT---", 1)
         return full_response, "No separate analysis generated."

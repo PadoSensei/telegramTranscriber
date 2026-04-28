@@ -26,23 +26,20 @@ def mock_user_cfg():
 async def test_sync_to_doc_mocked(google_manager, mock_user_cfg, mocker):
     """Verifies internal logic without hitting Google."""
     
-    # Manually override instance state to bypass file checks
-    google_manager.creds_path = "katie_OD_Google_Access.json"
-    mocker.patch("os.path.exists", return_value=True)
-
     # Mock the API client chain
-    mock_build = mocker.patch("google_manager.build")
+    mocker.patch("google_manager.GoogleManager._get_service")
+    google_manager._get_service = MagicMock()
     mock_service = MagicMock()
     mock_docs = MagicMock()
     mock_batch = MagicMock()
     
-    mock_build.return_value = mock_service
+    google_manager._get_service.return_value = mock_service
     mock_service.documents.return_value = mock_docs
     mock_docs.batchUpdate.return_value = mock_batch
     mock_batch.execute.return_value = {"status": "success"}
 
     result = await google_manager.sync_to_doc(
-        mock_user_cfg, "Star", "Fake Content", "Fake Analysis"
+        mock_user_cfg["gdrive_doc_id"], "Star", "Fake Content", "Fake Analysis", mock_user_cfg["name"]
     )
 
     assert result is True
@@ -59,10 +56,11 @@ async def test_sync_to_doc_live(google_manager, mock_user_cfg):
     
     # This calls the actual GoogleManager logic
     result = await google_manager.sync_to_doc(
-        mock_user_cfg, 
+        mock_user_cfg["gdrive_doc_id"],
         "Live Integration Test", 
         "This is a test message from Pytest.", 
-        "System is operational."
+        "System is operational.",
+        mock_user_cfg["name"]
     )
 
     assert result is True

@@ -2,14 +2,16 @@ import os
 import sys
 import logging
 import asyncio
+import httpx
 from datetime import datetime
 from dotenv import load_dotenv
 
 from telegram import Update
+from telegram.error import NetworkError
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
-from config import VAULT_CONFIGS, get_user_config
+from config import VAULT_CONFIGS, get_user_config, HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, HTTP_WRITE_TIMEOUT
 from bot_utils import restricted, parse_vault_request, send_large_message
 from transcriber import Transcriber, HallucinationError
 from factory import ManagerFactory
@@ -63,7 +65,27 @@ transcriber = Transcriber(model_name="tiny")
 state_manager = StateManager()
 processor = ManagerFactory.get_processor()
 
-# --- 2. CORE LOGIC ---
+# --- 2. ERROR HANDLING ---
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log the error and handle network-related blips."""
+    logger.error("Exception while handling an update:", exc_info=context.error)
+
+    # Handle Network and Read errors specifically to prevent loop termination
+    if isinstance(context.error, (NetworkError, httpx.ReadError, httpx.WriteError, httpx.ConnectError)):
+        logger.warning(f"Network-related error detected: {type(context.error).__name__}. Loop recovery should handle this.")
+        return
+
+    # For other types of errors, we might want to notify the user if update is valid
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "❌ An internal error occurred. Admin has been notified."
+            )
+        except Exception as e:
+            logger.error(f"Failed to send error notification to user: {e}")
+
+# --- 3. CORE LOGIC ---
 
 @restricted
 async def process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -193,21 +215,54 @@ async def process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(f"❌ System Error: {str(e)}")
 
 # --- 3. ENTRY POINT ---
-if __name__ == '__main__':
+def main():
+    """Main entry point with supervisor loop and exponential back-off."""
+    import time
+
     # Run boot diagnostics before starting the bot
     system_check()
 
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not token:
-        raise ValueError("TELEGRAM_BOT_TOKEN not found in environment!")
+    backoff_delay = 5
+    max_backoff = 60
 
-    # Request config with increased timeouts for large voice files
-    request_config = HTTPXRequest(connect_timeout=30.0, read_timeout=60.0)
-    app = ApplicationBuilder().token(token).request(request_config).build()
+    while True:
+        try:
+            token = os.getenv("TELEGRAM_BOT_TOKEN")
+            if not token:
+                logger.critical("TELEGRAM_BOT_TOKEN not found in environment!")
+                return
 
-    # Route Voice, Audio, and Text to the processor
-    app.add_handler(MessageHandler((filters.VOICE | filters.AUDIO), process_entry))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), process_entry))
-    
-    logger.info("🧠 2ndBrain Orchestrator: Multi-Tenant Mode Online")
-    app.run_polling(drop_pending_updates=True)
+            # Request config with optimized timeouts for heavy IO (transcription)
+            request_config = HTTPXRequest(
+                connect_timeout=HTTP_CONNECT_TIMEOUT,
+                read_timeout=HTTP_READ_TIMEOUT,
+                write_timeout=HTTP_WRITE_TIMEOUT
+            )
+            app = ApplicationBuilder().token(token).request(request_config).build()
+
+            # Route Voice, Audio, and Text to the processor
+            app.add_handler(MessageHandler((filters.VOICE | filters.AUDIO), process_entry))
+            app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), process_entry))
+
+            # Global Error Registry
+            app.add_error_handler(error_handler)
+
+            logger.info("🧠 2ndBrain Orchestrator: Multi-Tenant Mode Online")
+
+            # Start polling (blocking)
+            app.run_polling(drop_pending_updates=True)
+
+            # If polling exits gracefully, reset backoff for next attempt
+            backoff_delay = 5
+
+        except (KeyboardInterrupt, SystemExit):
+            logger.info("Bot stopped by user.")
+            break
+        except Exception as e:
+            logger.error(f"Application crash detected: {e}. Restarting in {backoff_delay}s...", exc_info=True)
+            time.sleep(backoff_delay)
+            # Exponential back-off capped at 60s
+            backoff_delay = min(backoff_delay * 2, max_backoff)
+
+if __name__ == '__main__':
+    main()
