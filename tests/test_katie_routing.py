@@ -1,13 +1,14 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from main import process_entry
+from schema import UserConfig
 
 # Using the placeholder ID for testing
 KATIE_ID = 999999999 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("input_text, expected_folder, expected_sync", [
-    # 1. No Hashtag -> Should NOT sync to Vault (Stays in bot feedback only)
+    # 1. No Hashtag -> Should go to Inbox
     ("Just thinking about the flight to Spain", "00_Inbox", True),
     
     # 2. #star Hashtag -> Should go to Katie's STAR_Story_Bank
@@ -29,17 +30,21 @@ async def test_katie_routing_logic(input_text, expected_folder, expected_sync, m
     # We patch the whitelist so the test ID is authorized
     mocker.patch("bot_utils.ALLOWED_IDS", [KATIE_ID])
     
-    # We patch the Vault Configs so the bot knows Katie's specific folder map
-    mocker.patch("main.VAULT_CONFIGS", {
-        KATIE_ID: {
-            "name": "Katie",
-            "category_map": {
-                "Star": "01_Projects/Bloom_Prep/STAR_Story_Bank",
-                "Bloom": "01_Projects/Bloom_Prep",
-                "Inbox": "00_Inbox"
-            }
+    mock_cfg = UserConfig(
+        name="Katie",
+        repo_url="https://github.com/mock/repo",
+        token="mock_token",
+        username="katieOD",
+        gdrive_doc_id="1-mock-doc-id-longer-than-20-chars",
+        category_map={
+            "Star": "01_Projects/Bloom_Prep/STAR_Story_Bank",
+            "Bloom": "01_Projects/Bloom_Prep",
+            "Inbox": "00_Inbox"
         }
-    })
+    )
+
+    # We patch get_user_config to return our mock config
+    mocker.patch("main.get_user_config", return_value=mock_cfg)
 
     # --- 1. MOCK SERVICES ---
     # Mock Transcriber (Async)
@@ -48,7 +53,7 @@ async def test_katie_routing_logic(input_text, expected_folder, expected_sync, m
     
     # Mock the Processor (Async)
     mock_processor = mocker.patch("main.processor.run_sync_stack", new_callable=AsyncMock)
-    mock_processor.return_value = ("Clean Text", "Analysis Output", True)
+    mock_processor.return_value = ("Clean Text", "Analysis Output", True, True)
     
     # Mock Telegram Update & Context
     mock_update = MagicMock()
@@ -56,6 +61,8 @@ async def test_katie_routing_logic(input_text, expected_folder, expected_sync, m
     mock_update.effective_user.id = KATIE_ID
     mock_update.effective_user.first_name = "Katie"
     mock_update.message.voice.file_id = "voice_123"
+    mock_update.message.text = None
+    mock_update.message.caption = None
     
     # Mock Status Message to allow 'await status_msg.delete()'
     mock_status_msg = AsyncMock()
@@ -69,9 +76,9 @@ async def test_katie_routing_logic(input_text, expected_folder, expected_sync, m
         # In the new Orchestrator, everything syncs!
         mock_processor.assert_called_once()
         
-        # Verify it used Katie's ID and the CORRECT folder path
+        # Verify it used the CORRECT mock config and folder path
         args, _ = mock_processor.call_args
-        assert args[0] == KATIE_ID
+        assert args[0] == mock_cfg
         assert args[1] == expected_folder
         
         print(f"✅ Successfully routed '{input_text}' to '{expected_folder}'")

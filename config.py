@@ -4,6 +4,11 @@ from schema import UserConfig
 
 load_dotenv()
 
+# Global HTTP Timeouts for Heavy IO (Transcription downloads/Syncs)
+HTTP_CONNECT_TIMEOUT = 20.0
+HTTP_READ_TIMEOUT    = 60.0
+HTTP_WRITE_TIMEOUT   = 20.0
+
 # ==========================================
 # MULTI-TENANT VAULT CONFIGURATIONS
 # ==========================================
