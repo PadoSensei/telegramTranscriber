@@ -12,7 +12,7 @@ from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filte
 from telegram.request import HTTPXRequest
 
 from config import VAULT_CONFIGS, get_user_config, HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, HTTP_WRITE_TIMEOUT
-from bot_utils import restricted, parse_vault_request, send_large_message
+from bot_utils import restricted, parse_vault_request, send_large_message, validate_media_file
 from transcriber import Transcriber, HallucinationError
 from factory import ManagerFactory
 from state_manager import StateManager
@@ -214,6 +214,37 @@ async def process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"[USER:{user_id}] ERROR: {str(e)}", exc_info=True)
         await status_msg.edit_text(f"❌ System Error: {str(e)}")
 
+@restricted
+async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handler for non-textual media (Images, Videos, Documents).
+    Validates security guardrails before logging success.
+    """
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    # Handle media groups (albums)
+    media_group_id = update.message.media_group_id
+    if media_group_id:
+        logger.info(f"[USER:{user_id}] Processing part of media group: {media_group_id}")
+
+    # 1. Validation
+    is_valid, file_info, error_message = validate_media_file(update.message)
+
+    if not is_valid:
+        await context.bot.send_message(chat_id=chat_id, text=error_message)
+        return
+
+    # 2. Success Placeholder
+    logger.info(f"[USER:{user_id}] SECURITY PASS: {file_info['file_name']} ({file_info['size_mb']:.1f}MB)")
+
+    # In Phase 2, we would call processor.ingest_media here
+    # For now, just confirm validation
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"✅ File '{file_info['original_name']}' (Size: {file_info['size_mb']:.1f}MB) passed security checks and would be secured in your Inbox."
+    )
+
 # --- 3. ENTRY POINT ---
 def main():
     """Main entry point with supervisor loop and exponential back-off."""
@@ -242,6 +273,15 @@ def main():
 
             # Route Voice, Audio, and Text to the processor
             app.add_handler(MessageHandler((filters.VOICE | filters.AUDIO), process_entry))
+
+            # Route other media attachments to security handler
+            # filters.ATTACHMENT includes VOICE/AUDIO/PHOTO/VIDEO/DOCUMENT/etc.
+            # We exclude VOICE/AUDIO because process_entry handles them, and TEXT.
+            app.add_handler(MessageHandler(
+                filters.ATTACHMENT & ~filters.VOICE & ~filters.AUDIO & ~filters.TEXT,
+                process_media
+            ))
+
             app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), process_entry))
 
             # Global Error Registry
