@@ -1,9 +1,11 @@
 import os
 import logging
 import shutil
+import git.exc
 from datetime import datetime
 from git import Repo
 from templates import NoteTemplate
+from exceptions import GitPersistenceError
 
 # Standardize logger to match the main orchestrator
 logger = logging.getLogger("2ndBrain.VaultManager")
@@ -34,46 +36,66 @@ class VaultManager:
 
             # 1. CLEANUP/PREP
             if os.path.exists(self.temp_dir):
-                shutil.rmtree(self.temp_dir)
+                try:
+                    shutil.rmtree(self.temp_dir)
+                except Exception as e:
+                    logger.warning(f"[USER:{self.username}] Initial cleanup failed: {e}")
 
             # 2. CLONE
             logger.info(f"[USER:{self.username}] Cloning vault for media ingestion...")
-            repo = Repo.clone_from(self.auth_url, self.temp_dir)
+            try:
+                repo = Repo.clone_from(self.auth_url, self.temp_dir)
+            except git.exc.GitCommandError as e:
+                raise GitPersistenceError(f"Failed to clone repository: {str(e)}")
 
             # 3. DIRECTORY PREP (Always 00_Inbox for now)
             target_category = "00_Inbox"
             full_folder_path = os.path.join(self.temp_dir, target_category)
-            os.makedirs(full_folder_path, exist_ok=True)
+            try:
+                os.makedirs(full_folder_path, exist_ok=True)
+            except OSError as e:
+                raise GitPersistenceError(f"Failed to create directory: {str(e)}")
 
             # 4. WRITE BINARY FILE
             media_path = os.path.join(full_folder_path, filename)
-            with open(media_path, 'wb') as f:
-                f.write(media_content_bytes)
+            try:
+                with open(media_path, 'wb') as f:
+                    f.write(media_content_bytes)
+            except IOError as e:
+                raise GitPersistenceError(f"Failed to write media file: {str(e)}")
 
             # 5. WRITE METADATA FILE
             metadata_filename = f"{filename}.md"
             metadata_path = os.path.join(full_folder_path, metadata_filename)
-            with open(metadata_path, 'w', encoding='utf-8') as f:
-                f.write(metadata_content)
+            try:
+                with open(metadata_path, 'w', encoding='utf-8') as f:
+                    f.write(metadata_content)
+            except IOError as e:
+                raise GitPersistenceError(f"Failed to write metadata file: {str(e)}")
 
             # 6. DISCOVERY (Optional but kept for consistency)
             self._discover_new_folders(repo)
 
             # 7. COMMIT & PUSH
-            repo.git.add(A=True)
-            commit_msg = f"Media Ingest: {filename} via 2ndBrain Bot"
-            repo.index.commit(commit_msg)
+            try:
+                repo.git.add(A=True)
+                commit_msg = f"Media Ingest: {filename} via 2ndBrain Bot"
+                repo.index.commit(commit_msg)
 
-            origin = repo.remote(name='origin')
-            origin.push()
+                origin = repo.remote(name='origin')
+                origin.push()
+            except git.exc.GitCommandError as e:
+                raise GitPersistenceError(f"Git operation failed: {str(e)}")
 
             relative_path = os.path.join(target_category, filename)
             logger.info(f"[USER:{self.username}] ✅ Media secured successfully: {relative_path}")
             return relative_path
 
+        except GitPersistenceError:
+            raise # Re-raise our custom exception
         except Exception as e:
-            logger.error(f"[USER:{self.username}] ❌ secure_media Error: {str(e)}")
-            raise e # Re-raise to let the processor handle it
+            logger.error(f"[USER:{self.username}] ❌ secure_media Unexpected Error: {str(e)}")
+            raise GitPersistenceError(f"An unexpected error occurred during persistence: {str(e)}")
         finally:
             self._cleanup()
 

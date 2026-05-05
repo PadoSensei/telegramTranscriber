@@ -153,7 +153,7 @@ def validate_media_file(message: Message):
     # 1. Size Check
     size_mb = file_size / (1024 * 1024)
     if size_mb > MAX_FILE_SIZE_MB:
-        return False, {}, f"❌ Sorry, that file is too large. We currently support files up to {MAX_FILE_SIZE_MB}MB."
+        return False, {}, f"❌ Sorry, that file is too large ({size_mb:.1f}MB). We currently support files up to {MAX_FILE_SIZE_MB}MB."
 
     # 2. Determine Filenames
     now = datetime.now()
