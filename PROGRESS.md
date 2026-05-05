@@ -20,6 +20,8 @@ We are successfully transitioning the "2ndBrain" orchestrator from a brittle pro
 - Finalizing Phase 5 of the "Spain-Ready" roadmap.
 
 ## ✅ Recent Wins (Phase 3 & 4)
+- **Universal Media Ingestion:** Implemented complete persistence layer for binary files (images, videos, documents) with companion Markdown metadata.
+- **Media Group Orchestration:** Added intelligent debouncing for Telegram media groups, allowing batch processing and consolidated user feedback.
 - **Whisper Hallucination Filtering:** Successfully implemented a heuristic blacklist and custom `HallucinationError` to catch and block "Ghost Notes."
 - **Stateless Manager Factory:** Refactored `TaskProcessor` and `ManagerFactory` to ensure per-request isolation. No more shared state between users.
 - **Soft-Fail Resiliency:** Decoupled GitHub and Google syncs. GitHub success now confirms the update even if Google fails.
