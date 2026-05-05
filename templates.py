@@ -70,3 +70,29 @@ class NoteTemplate:
             f"{analysis_output}\n\n"
             "--- \n"
         )
+
+class MediaTemplate:
+    @staticmethod
+    def get_metadata_content(filename, original_name, mime_type, file_size, caption, timestamp):
+        """
+        Generates content for the companion .md file for media attachments.
+        Includes frontmatter and an Obsidian link to the binary file.
+        """
+        size_mb = file_size / (1024 * 1024)
+
+        content = (
+            "---\n"
+            f"original_name: \"{original_name}\"\n"
+            f"mime_type: {mime_type}\n"
+            f"size_bytes: {file_size}\n"
+            f"size_mb: {size_mb:.2f}\n"
+            f"ingested_at: {timestamp}\n"
+            "---\n\n"
+            f"# 📎 Media Attachment: {original_name}\n\n"
+            f"![[{filename}]]\n\n"
+        )
+
+        if caption:
+            content += f"## 📝 Caption\n{caption}\n"
+
+        return content

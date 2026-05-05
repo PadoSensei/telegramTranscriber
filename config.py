@@ -9,6 +9,21 @@ HTTP_CONNECT_TIMEOUT = 20.0
 HTTP_READ_TIMEOUT    = 60.0
 HTTP_WRITE_TIMEOUT   = 20.0
 
+# Security Guardrails
+MAX_FILE_SIZE_MB = 20
+FILE_TYPE_BLACKLIST = [
+    '.exe', '.bat', '.cmd', '.sh', '.bin', '.dll', '.run', '.msi', '.apk', '.jar', # Executables
+    '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', # Hazardous archives
+    '.dmg', '.iso', '.vhd', '.vmdk', # Disk images
+    '.js', '.vbs', '.wsf', '.ps1', '.php', '.py', '.rb', '.pl', # Scripts
+    '.docm', '.xlsm', '.pptm', '.rtf' # Macro-enabled files
+]
+MIME_TYPE_BLACKLIST = [
+    'application/x-executable', 'application/x-sh', 'text/x-shellscript',
+    'application/zip', 'application/x-rar-compressed', 'application/x-7z-compressed',
+    'application/x-msdownload'
+]
+
 # ==========================================
 # MULTI-TENANT VAULT CONFIGURATIONS
 # ==========================================
