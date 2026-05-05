@@ -13,6 +13,7 @@ from telegram.request import HTTPXRequest
 
 from config import VAULT_CONFIGS, get_user_config, HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, HTTP_WRITE_TIMEOUT
 from bot_utils import restricted, parse_vault_request, send_large_message, validate_media_file
+from exceptions import MediaIngestionError, TelegramDownloadError, GitPersistenceError
 from transcriber import Transcriber, HallucinationError
 from factory import ManagerFactory
 from state_manager import StateManager
@@ -245,24 +246,28 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await status_msg.edit_text(f"🛰️ Downloading '{file_info['original_name']}'...")
 
             # 3. Ingestion
-            # We add a small intermediate status for "Securing" as requested
-            # Since ingest_single_media handles download then secure, we can split if needed
-            # but for now, we'll update status just before the call or inside if we want more granularity.
-            # Let's do it here for simplicity of orchestration.
+            # We add a small intermediate status for "Securing" as requested.
+            # Note: processor handles heavy lifting. We pass status_msg to it
+            # so it can update the user when it transitions from Downloading to Securing.
 
-            # Note: processor handles the heavy lifting and offloading to run_in_executor
-            # We'll just edit the text to "Securing" after a brief moment or inside processor.
-            # To be precise, let's pass the status_msg to processor or just update here.
-
-            await processor.ingest_single_media(user_cfg, file_info, file_info['file_id'], context)
-            await status_msg.edit_text(f"📦 Securing '{file_info['original_name']}' to Vault...")
+            # First update to Downloading is already done above.
+            await processor.ingest_single_media(user_cfg, file_info, file_info['file_id'], context, status_msg=status_msg)
 
             await status_msg.edit_text(f"✅ Data Secured! '{file_info['original_name']}' saved to your Inbox.")
             logger.info(f"[USER:{user_id}] Media secured: {file_info['file_name']}")
 
+        except TelegramDownloadError as e:
+            logger.error(f"[USER:{user_id}] Telegram Download Error: {e}")
+            await status_msg.edit_text("⚠️ Failed to download your file from Telegram. This might be a temporary network issue. Please try again.")
+        except GitPersistenceError as e:
+            logger.error(f"[USER:{user_id}] Git Persistence Error: {e}")
+            await status_msg.edit_text("❌ Failed to save your file to the Obsidian vault. This might be a temporary issue with GitHub or your repository settings. Please try again.")
+        except MediaIngestionError as e:
+            logger.error(f"[USER:{user_id}] Media Ingestion Error: {e}")
+            await status_msg.edit_text(f"❌ {str(e)}")
         except Exception as e:
-            logger.error(f"[USER:{user_id}] Media Ingestion Error: {e}", exc_info=True)
-            await status_msg.edit_text(f"❌ Failed to secure media: {str(e)}")
+            logger.error(f"[USER:{user_id}] Unexpected Media Ingestion Error: {e}", exc_info=True)
+            await status_msg.edit_text(f"❌ An internal error occurred while processing your request. The admin has been notified.")
         return
 
     # MEDIA GROUP (ALBUM) PATH
@@ -313,10 +318,10 @@ async def debounced_ingest_group(media_group_id: str, user_id: int, context: Con
         if failed == 0:
             await status_msg.edit_text(f"✅ Data Secured! {succeeded} items saved to your Inbox.")
         elif succeeded > 0:
-            fail_summary = "\n".join([f"- {d['filename']}: {d['reason']}" for d in results['failed_details']])
+            first_fail = results['failed_details'][0]
             await status_msg.edit_text(
-                f"⚠️ Data Secured! {succeeded}/{total} items saved to your Inbox.\n\n"
-                f"❌ {failed} items failed:\n{fail_summary}"
+                f"⚠️ Data Secured! {succeeded} files saved. {failed} files failed "
+                f"(e.g., '{first_fail['filename']}' - {first_fail['reason']}). Please check your vault."
             )
         else:
             fail_summary = "\n".join([f"- {d['filename']}: {d['reason']}" for d in results['failed_details']])
@@ -333,6 +338,24 @@ async def debounced_ingest_group(media_group_id: str, user_id: int, context: Con
                 await status_msg.edit_text(f"❌ Failed to process media group: {str(e)}")
         except Exception as notify_error:
             logger.error(f"Failed to send group error notification: {notify_error}")
+
+async def _shutdown_media_group_timers():
+    """
+    Cancels any active media group debouncing timers and clears the state.
+    """
+    if not _media_groups_processing:
+        return
+
+    logger.info(f"Shutting down {len(_media_groups_processing)} active media group timers...")
+
+    for media_group_id, group_data in _media_groups_processing.items():
+        task = group_data.get('task')
+        if task and not task.done():
+            task.cancel()
+            logger.debug(f"Cancelled timer for media group: {media_group_id}")
+
+    _media_groups_processing.clear()
+    logger.info("Media group processing state cleared.")
 
 # --- 3. ENTRY POINT ---
 def main():
@@ -385,6 +408,17 @@ def main():
             backoff_delay = 5
 
         except (KeyboardInterrupt, SystemExit):
+            logger.info("Bot stopping...")
+            # Create a new event loop to run the async shutdown task if the current one is closed
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(_shutdown_media_group_timers())
+                else:
+                    loop.run_until_complete(_shutdown_media_group_timers())
+            except Exception as shutdown_error:
+                logger.error(f"Error during graceful shutdown: {shutdown_error}")
+
             logger.info("Bot stopped by user.")
             break
         except Exception as e:
