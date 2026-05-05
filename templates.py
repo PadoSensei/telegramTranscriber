@@ -78,21 +78,22 @@ class MediaTemplate:
         Generates content for the companion .md file for media attachments.
         Includes frontmatter and an Obsidian link to the binary file.
         """
-        size_mb = file_size / (1024 * 1024)
-
         content = (
             "---\n"
+            "type: media\n"
             f"original_name: \"{original_name}\"\n"
+            f"filename: \"{filename}\"\n"
             f"mime_type: {mime_type}\n"
-            f"size_bytes: {file_size}\n"
-            f"size_mb: {size_mb:.2f}\n"
-            f"ingested_at: {timestamp}\n"
+            f"file_size_bytes: {file_size}\n"
+            f"caption: \"{caption if caption else ''}\"\n"
+            f"ingest_date: {timestamp}\n"
+            "status: raw\n"
             "---\n\n"
-            f"# 📎 Media Attachment: {original_name}\n\n"
-            f"![[{filename}]]\n\n"
         )
 
         if caption:
-            content += f"## 📝 Caption\n{caption}\n"
+            content += f"{caption}\n\n"
+
+        content += f"![[{filename}]]\n"
 
         return content

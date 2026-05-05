@@ -218,10 +218,18 @@ async def process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Handler for non-textual media (Images, Videos, Documents).
-    Validates security guardrails before logging success.
+    Validates security guardrails and persists to GitHub.
     """
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
+    user_name = update.effective_user.first_name
+
+    try:
+        user_cfg_model = get_user_config(user_id)
+    except ValueError as e:
+        logger.error(f"Config error for user {user_id}: {e}")
+        await context.bot.send_message(chat_id=chat_id, text="❌ Configuration Error. Please contact admin.")
+        return
 
     # Handle media groups (albums)
     media_group_id = update.message.media_group_id
@@ -229,21 +237,41 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"[USER:{user_id}] Processing part of media group: {media_group_id}")
 
     # 1. Validation
+    status_msg = await context.bot.send_message(chat_id=chat_id, text="⏳ Capturing and securing your data...")
     is_valid, file_info, error_message = validate_media_file(update.message)
 
     if not is_valid:
-        await context.bot.send_message(chat_id=chat_id, text=error_message)
+        await status_msg.edit_text(error_message)
         return
 
-    # 2. Success Placeholder
+    # 2. Media Ingestion
     logger.info(f"[USER:{user_id}] SECURITY PASS: {file_info['file_name']} ({file_info['size_mb']:.1f}MB)")
 
-    # In Phase 2, we would call processor.ingest_media here
-    # For now, just confirm validation
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=f"✅ File '{file_info['original_name']}' (Size: {file_info['size_mb']:.1f}MB) passed security checks and would be secured in your Inbox."
-    )
+    try:
+        await status_msg.edit_text(f"🛰️ Downloading '{file_info['original_name']}' and syncing to Vault...")
+
+        # Inject caption if available from the message
+        file_info['caption'] = update.message.caption or ""
+
+        secured_filename = await processor.ingest_media(
+            user_cfg_model,
+            file_info,
+            file_info['file_id'],
+            context
+        )
+
+        await status_msg.edit_text(
+            f"✅ *Data Secured!* Your '{file_info['original_name']}' "
+            f"is saved in your Obsidian Inbox (Size: {file_info['size_mb']:.1f}MB)."
+        )
+        logger.info(f"[USER:{user_name}] Media '{file_info['original_name']}' secured as '{secured_filename}'.")
+
+    except Exception as e:
+        logger.error(f"[USER:{user_name}] Failed to secure media '{file_info['original_name']}': {e}", exc_info=True)
+        await status_msg.edit_text(
+            f"❌ Failed to save your '{file_info['original_name']}'. "
+            f"An error occurred during download or vault sync. Please try again."
+        )
 
 # --- 3. ENTRY POINT ---
 def main():

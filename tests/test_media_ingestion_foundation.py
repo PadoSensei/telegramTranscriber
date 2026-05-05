@@ -71,5 +71,4 @@ def test_media_template():
     assert 'original_name: "my_photo.jpg"' in content
     assert 'mime_type: image/jpeg' in content
     assert f'![[{filename}]]' in content
-    assert "## 📝 Caption" in content
     assert caption in content

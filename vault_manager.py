@@ -22,6 +22,52 @@ class VaultManager:
         # Format URL with token for silent HTTPS authentication
         self.auth_url = self.repo_url.replace("https://", f"https://{username}:{token}@")
 
+    def secure_media(self, filename: str, media_content_bytes: bytes, metadata_content: str) -> str:
+        """
+        Persists binary media and its metadata directly to the user's GitHub 00_Inbox.
+        """
+        try:
+            logger.info(f"[USER:{self.username}] Securing media: {filename}")
+
+            # 1. CLEANUP PREVIOUS RUNS
+            if os.path.exists(self.temp_dir):
+                shutil.rmtree(self.temp_dir)
+
+            # 2. CLONE
+            logger.info(f"[USER:{self.username}] Cloning repository for media ingest...")
+            repo = Repo.clone_from(self.auth_url, self.temp_dir)
+
+            # 3. ENSURE 00_Inbox EXISTS
+            inbox_dir = os.path.join(self.temp_dir, "00_Inbox")
+            os.makedirs(inbox_dir, exist_ok=True)
+
+            # 4. WRITE MEDIA AND METADATA
+            media_path = os.path.join(inbox_dir, filename)
+            metadata_path = os.path.join(inbox_dir, f"{filename}.md")
+
+            with open(media_path, 'wb') as f:
+                f.write(media_content_bytes)
+
+            with open(metadata_path, 'w', encoding='utf-8') as f:
+                f.write(metadata_content)
+
+            # 5. GIT ATOMIC TRANSACTION
+            repo.git.add(A=True)
+            repo.index.commit(f"📥 Media Ingest: {filename}")
+
+            origin = repo.remote(name='origin')
+            origin.push()
+
+            relative_path = os.path.join("00_Inbox", filename)
+            logger.info(f"[USER:{self.username}] ✅ Media secured at {relative_path}")
+            return relative_path
+
+        except Exception as e:
+            logger.error(f"[USER:{self.username}] ❌ Secure Media Error: {str(e)}")
+            raise
+        finally:
+            self._cleanup()
+
     def push_to_obsidian(self, target_category, target_project, clean_transcript, analysis_output):
         """
         Clones, verifies paths, updates, and pushes a Markdown entry to the specific GitHub vault.
