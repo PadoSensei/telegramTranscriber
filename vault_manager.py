@@ -17,10 +17,65 @@ class VaultManager:
         self.token = token
         self.username = username
         # Unique temp directory per user to avoid collision during parallel processing
-        self.temp_dir = f"temp_vault_{username}"
+        # Add a short unique suffix to avoid collision in high-concurrency scenarios
+        self.temp_dir = f"temp_vault_{username}_{datetime.now().strftime('%H%M%S%f')}"
         
         # Format URL with token for silent HTTPS authentication
         self.auth_url = self.repo_url.replace("https://", f"https://{username}:{token}@")
+
+    def secure_media(self, filename: str, media_content_bytes: bytes, metadata_content: str) -> str:
+        """
+        Atomically clones the vault, writes a binary media file and its companion .md metadata,
+        and pushes the changes to GitHub.
+        Returns the relative path of the saved media file.
+        """
+        try:
+            logger.info(f"[USER:{self.username}] Starting secure_media for: {filename}")
+
+            # 1. CLEANUP/PREP
+            if os.path.exists(self.temp_dir):
+                shutil.rmtree(self.temp_dir)
+
+            # 2. CLONE
+            logger.info(f"[USER:{self.username}] Cloning vault for media ingestion...")
+            repo = Repo.clone_from(self.auth_url, self.temp_dir)
+
+            # 3. DIRECTORY PREP (Always 00_Inbox for now)
+            target_category = "00_Inbox"
+            full_folder_path = os.path.join(self.temp_dir, target_category)
+            os.makedirs(full_folder_path, exist_ok=True)
+
+            # 4. WRITE BINARY FILE
+            media_path = os.path.join(full_folder_path, filename)
+            with open(media_path, 'wb') as f:
+                f.write(media_content_bytes)
+
+            # 5. WRITE METADATA FILE
+            metadata_filename = f"{filename}.md"
+            metadata_path = os.path.join(full_folder_path, metadata_filename)
+            with open(metadata_path, 'w', encoding='utf-8') as f:
+                f.write(metadata_content)
+
+            # 6. DISCOVERY (Optional but kept for consistency)
+            self._discover_new_folders(repo)
+
+            # 7. COMMIT & PUSH
+            repo.git.add(A=True)
+            commit_msg = f"Media Ingest: {filename} via 2ndBrain Bot"
+            repo.index.commit(commit_msg)
+
+            origin = repo.remote(name='origin')
+            origin.push()
+
+            relative_path = os.path.join(target_category, filename)
+            logger.info(f"[USER:{self.username}] ✅ Media secured successfully: {relative_path}")
+            return relative_path
+
+        except Exception as e:
+            logger.error(f"[USER:{self.username}] ❌ secure_media Error: {str(e)}")
+            raise e # Re-raise to let the processor handle it
+        finally:
+            self._cleanup()
 
     def push_to_obsidian(self, target_category, target_project, clean_transcript, analysis_output):
         """

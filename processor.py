@@ -4,6 +4,8 @@ import asyncio
 from vault_manager import VaultManager
 from google_manager import GoogleManager
 from ai_engine import AIEngine
+from templates import MediaTemplate
+from bot_utils import validate_media_file
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +13,87 @@ class TaskProcessor:
     def __init__(self):
         # AI Engine can be shared as it's typically a thread-safe client or stateless
         self.ai = AIEngine(api_key=os.getenv("GEMINI_API_KEY"))
+
+    async def ingest_single_media(self, user_cfg, file_info: dict, file_id: str, context) -> str:
+        """
+        Downloads a single media file from Telegram and secures it in the vault.
+        """
+        user_name = user_cfg.name
+        logger.info(f"📥 [USER:{user_name}] Downloading media: {file_info['original_name']}")
+
+        loop = asyncio.get_running_loop()
+
+        # 1. Download from Telegram
+        file = await context.bot.get_file(file_id)
+        content = await file.download_as_bytearray()
+
+        # 2. Generate Metadata
+        metadata = MediaTemplate.get_metadata_content(
+            filename=file_info['file_name'],
+            original_name=file_info['original_name'],
+            mime_type=file_info['mime_type'],
+            file_size=file_info['file_size'],
+            caption=file_info.get('caption'),
+            timestamp=file_info['timestamp']
+        )
+
+        # 3. Persist to Vault
+        vault = VaultManager(user_cfg.repo_url, user_cfg.token, user_cfg.username)
+
+        # Offload heavy Git IO to executor
+        saved_path = await loop.run_in_executor(
+            None,
+            vault.secure_media,
+            file_info['file_name'],
+            bytes(content),
+            metadata
+        )
+
+        return saved_path
+
+    async def ingest_media_group(self, user_cfg, updates: list, context) -> dict:
+        """
+        Orchestrates processing for a group of media files.
+        """
+        user_name = user_cfg.name
+        logger.info(f"📦 [USER:{user_name}] Processing media group ({len(updates)} items)")
+
+        results = {
+            'total_files': len(updates),
+            'succeeded': 0,
+            'failed': 0,
+            'failed_details': [],
+            'saved_files': []
+        }
+
+        for update in updates:
+            # 1. Validate each file in the group
+            is_valid, file_info, error_message = validate_media_file(update.message)
+
+            if not is_valid:
+                logger.warning(f"❌ Validation failed for a file in group: {error_message}")
+                results['failed'] += 1
+                # Try to get a filename for the failure report
+                fname = "Unknown"
+                if update.message.document: fname = update.message.document.file_name
+                elif update.message.video: fname = update.message.video.file_name
+                results['failed_details'].append({'filename': fname, 'reason': error_message})
+                continue
+
+            # Add caption if present
+            file_info['caption'] = update.message.caption
+
+            # 2. Ingest
+            try:
+                saved_path = await self.ingest_single_media(user_cfg, file_info, file_info['file_id'], context)
+                results['succeeded'] += 1
+                results['saved_files'].append(file_info['original_name'])
+            except Exception as e:
+                logger.error(f"❌ Failed to ingest group item {file_info['original_name']}: {e}")
+                results['failed'] += 1
+                results['failed_details'].append({'filename': file_info['original_name'], 'reason': str(e)})
+
+        return results
 
     async def run_sync_stack(self, user_cfg, category, project, text):
         """

@@ -189,6 +189,7 @@ def validate_media_file(message: Message):
         "file_name": generated_name,
         "original_name": original_name,
         "mime_type": mime_type,
+        "media_type": media_type,
         "file_size": file_size,
         "size_mb": size_mb,
         "timestamp": timestamp_metadata

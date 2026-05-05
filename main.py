@@ -65,6 +65,10 @@ transcriber = Transcriber(model_name="tiny")
 state_manager = StateManager()
 processor = ManagerFactory.get_processor()
 
+# In-memory storage for media group debouncing
+# Format: {media_group_id: {'updates': [Update], 'task': asyncio.Task, 'status_msg': Message}}
+_media_groups_processing = {}
+
 # --- 2. ERROR HANDLING ---
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -218,32 +222,117 @@ async def process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Handler for non-textual media (Images, Videos, Documents).
-    Validates security guardrails before logging success.
+    Implements debouncing for media groups to provide consolidated feedback.
     """
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
-
-    # Handle media groups (albums)
     media_group_id = update.message.media_group_id
-    if media_group_id:
-        logger.info(f"[USER:{user_id}] Processing part of media group: {media_group_id}")
 
-    # 1. Validation
-    is_valid, file_info, error_message = validate_media_file(update.message)
+    if not media_group_id:
+        # SINGLE FILE PATH
+        status_msg = await update.message.reply_text("⏳ Processing Media...")
+        try:
+            # 1. Validation
+            is_valid, file_info, error_message = validate_media_file(update.message)
+            if not is_valid:
+                await status_msg.edit_text(error_message)
+                return
 
-    if not is_valid:
-        await context.bot.send_message(chat_id=chat_id, text=error_message)
+            file_info['caption'] = update.message.caption
+            user_cfg = get_user_config(user_id)
+
+            # 2. Progress Feedback
+            await status_msg.edit_text(f"🛰️ Downloading '{file_info['original_name']}'...")
+
+            # 3. Ingestion
+            # We add a small intermediate status for "Securing" as requested
+            # Since ingest_single_media handles download then secure, we can split if needed
+            # but for now, we'll update status just before the call or inside if we want more granularity.
+            # Let's do it here for simplicity of orchestration.
+
+            # Note: processor handles the heavy lifting and offloading to run_in_executor
+            # We'll just edit the text to "Securing" after a brief moment or inside processor.
+            # To be precise, let's pass the status_msg to processor or just update here.
+
+            await processor.ingest_single_media(user_cfg, file_info, file_info['file_id'], context)
+            await status_msg.edit_text(f"📦 Securing '{file_info['original_name']}' to Vault...")
+
+            await status_msg.edit_text(f"✅ Data Secured! '{file_info['original_name']}' saved to your Inbox.")
+            logger.info(f"[USER:{user_id}] Media secured: {file_info['file_name']}")
+
+        except Exception as e:
+            logger.error(f"[USER:{user_id}] Media Ingestion Error: {e}", exc_info=True)
+            await status_msg.edit_text(f"❌ Failed to secure media: {str(e)}")
         return
 
-    # 2. Success Placeholder
-    logger.info(f"[USER:{user_id}] SECURITY PASS: {file_info['file_name']} ({file_info['size_mb']:.1f}MB)")
+    # MEDIA GROUP (ALBUM) PATH
+    if media_group_id not in _media_groups_processing:
+        _media_groups_processing[media_group_id] = {
+            'updates': [],
+            'task': None,
+            'status_msg': await update.message.reply_text("⏳ Processing Media Group...")
+        }
 
-    # In Phase 2, we would call processor.ingest_media here
-    # For now, just confirm validation
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=f"✅ File '{file_info['original_name']}' (Size: {file_info['size_mb']:.1f}MB) passed security checks and would be secured in your Inbox."
+    group_data = _media_groups_processing[media_group_id]
+    group_data['updates'].append(update)
+
+    # Debounce: Cancel previous timer and start a new one
+    if group_data['task']:
+        group_data['task'].cancel()
+
+    group_data['task'] = asyncio.create_task(
+        debounced_ingest_group(media_group_id, user_id, context)
     )
+
+async def debounced_ingest_group(media_group_id: str, user_id: int, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Waits for 1.5s of silence for a media group before processing all items at once.
+    """
+    try:
+        await asyncio.sleep(1.5)
+
+        # Retrieve and clear from tracking
+        group_data = _media_groups_processing.pop(media_group_id, None)
+        if not group_data:
+            return
+
+        updates = group_data['updates']
+        status_msg = group_data['status_msg']
+
+        user_cfg = get_user_config(user_id)
+
+        await status_msg.edit_text(f"🛰️ Downloading {len(updates)} files from group...")
+
+        results = await processor.ingest_media_group(user_cfg, updates, context)
+
+        # Consolidated Feedback
+        succeeded = results['succeeded']
+        failed = results['failed']
+        total = results['total_files']
+
+        if failed == 0:
+            await status_msg.edit_text(f"✅ Data Secured! {succeeded} items saved to your Inbox.")
+        elif succeeded > 0:
+            fail_summary = "\n".join([f"- {d['filename']}: {d['reason']}" for d in results['failed_details']])
+            await status_msg.edit_text(
+                f"⚠️ Data Secured! {succeeded}/{total} items saved to your Inbox.\n\n"
+                f"❌ {failed} items failed:\n{fail_summary}"
+            )
+        else:
+            fail_summary = "\n".join([f"- {d['filename']}: {d['reason']}" for d in results['failed_details']])
+            await status_msg.edit_text(f"❌ All items in media group failed:\n{fail_summary}")
+
+    except asyncio.CancelledError:
+        # Expected when a new item arrives before the timer expires
+        pass
+    except Exception as e:
+        logger.error(f"Error in debounced_ingest_group: {e}", exc_info=True)
+        # Attempt to notify the user if we still have access to the group_data or status_msg
+        try:
+            if 'status_msg' in locals() and status_msg:
+                await status_msg.edit_text(f"❌ Failed to process media group: {str(e)}")
+        except Exception as notify_error:
+            logger.error(f"Failed to send group error notification: {notify_error}")
 
 # --- 3. ENTRY POINT ---
 def main():
