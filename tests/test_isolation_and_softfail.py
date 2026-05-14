@@ -1,7 +1,7 @@
 import pytest
 import asyncio
-from processor import TaskProcessor
-from schema import UserConfig
+from telegram_transcriber.processor import TaskProcessor
+from telegram_transcriber.schema import UserConfig
 from unittest.mock import MagicMock, patch, AsyncMock
 
 @pytest.fixture
@@ -25,12 +25,12 @@ async def test_run_sync_stack_soft_fail(processor, user_cfg, mocker):
     processor.ai.get_structured_output = AsyncMock(return_value=("clean", "analysis"))
 
     # Mock VaultManager (Git Success)
-    mock_vault_cls = mocker.patch('processor.VaultManager')
+    mock_vault_cls = mocker.patch('telegram_transcriber.processor.VaultManager')
     mock_vault_instance = mock_vault_cls.return_value
     mock_vault_instance.push_to_obsidian.return_value = True
 
     # Mock GoogleManager (Google Fail)
-    mock_google_cls = mocker.patch('processor.GoogleManager')
+    mock_google_cls = mocker.patch('telegram_transcriber.processor.GoogleManager')
     mock_google_instance = mock_google_cls.return_value
     mock_google_instance.sync_to_doc = AsyncMock(return_value=False)
 

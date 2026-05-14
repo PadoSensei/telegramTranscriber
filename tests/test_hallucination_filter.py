@@ -1,5 +1,5 @@
 import pytest
-from transcriber import Transcriber, HallucinationError
+from telegram_transcriber.transcriber import Transcriber, HallucinationError
 import os
 
 @pytest.fixture

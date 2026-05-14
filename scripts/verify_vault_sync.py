@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from vault_manager import VaultManager
+from telegram_transcriber.vault_manager import VaultManager
 
 # 1. Load your real credentials
 load_dotenv()

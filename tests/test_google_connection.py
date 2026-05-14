@@ -1,7 +1,7 @@
 import pytest
 import os
 from unittest.mock import MagicMock, patch
-from google_manager import GoogleManager
+from telegram_transcriber.google_manager import GoogleManager
 
 # --- FIXTURES ---
 
@@ -27,7 +27,7 @@ async def test_sync_to_doc_mocked(google_manager, mock_user_cfg, mocker):
     """Verifies internal logic without hitting Google."""
     
     # Mock the API client chain
-    mocker.patch("google_manager.GoogleManager._get_service")
+    mocker.patch("telegram_transcriber.google_manager.GoogleManager._get_service")
     google_manager._get_service = MagicMock()
     mock_service = MagicMock()
     mock_docs = MagicMock()

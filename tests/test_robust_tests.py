@@ -1,7 +1,7 @@
 import pytest
 import os
-from vault_manager import VaultManager
-from config import VAULT_CONFIGS
+from telegram_transcriber.vault_manager import VaultManager
+from telegram_transcriber.config import VAULT_CONFIGS
 
 # --- TEST 1: WORKSPACE ISOLATION (Race Condition Prevention) ---
 def test_workspace_isolation():
@@ -69,7 +69,7 @@ def test_persona_isolation():
     Ensures that hashtags don't 'leak' between users if their 
     category_maps are different.
     """
-    from bot_utils import parse_vault_request
+    from telegram_transcriber.bot_utils import parse_vault_request
     
     # Katie uses #Star for her interview bank
     katie_map = VAULT_CONFIGS[8630747869]["category_map"]

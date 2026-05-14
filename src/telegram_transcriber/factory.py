@@ -1,4 +1,4 @@
-from processor import TaskProcessor
+from .processor import TaskProcessor
 
 class ManagerFactory:
     """

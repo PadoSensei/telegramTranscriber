@@ -4,8 +4,8 @@ import shutil
 import git.exc
 from datetime import datetime
 from git import Repo
-from templates import NoteTemplate
-from exceptions import GitPersistenceError
+from .templates import NoteTemplate
+from .exceptions import GitPersistenceError
 
 # Standardize logger to match the main orchestrator
 logger = logging.getLogger("2ndBrain.VaultManager")
@@ -185,7 +185,7 @@ class VaultManager:
                     found_folders.append(rel_path)
 
             # Internal mapping update: Update bot_state.json with discovered folders
-            from state_manager import StateManager
+            from .state_manager import StateManager
             state = StateManager()
             state.set_discovered_folders(self.username, found_folders)
 

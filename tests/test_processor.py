@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock
-from processor import TaskProcessor
-from schema import UserConfig
+from telegram_transcriber.processor import TaskProcessor
+from telegram_transcriber.schema import UserConfig
 
 @pytest.fixture
 def mock_user_config():
@@ -17,9 +17,9 @@ def mock_user_config():
 @pytest.fixture
 def processor(mocker):
     # Mock components to isolate TaskProcessor logic
-    mocker.patch("processor.AIEngine")
-    mocker.patch("processor.GoogleManager")
-    mocker.patch("processor.VaultManager")
+    mocker.patch("telegram_transcriber.processor.AIEngine")
+    mocker.patch("telegram_transcriber.processor.GoogleManager")
+    mocker.patch("telegram_transcriber.processor.VaultManager")
     return TaskProcessor()
 
 @pytest.mark.asyncio
@@ -29,11 +29,11 @@ async def test_run_sync_stack_success(processor, mock_user_config, mocker):
     processor.ai.get_structured_output = AsyncMock(return_value=("Clean Story", "Analysis"))
     
     # We need to mock the classes that are instantiated locally in run_sync_stack
-    mock_vault_cls = mocker.patch("processor.VaultManager")
+    mock_vault_cls = mocker.patch("telegram_transcriber.processor.VaultManager")
     mock_vault = mock_vault_cls.return_value
     mock_vault.push_to_obsidian.return_value = True
 
-    mock_google_cls = mocker.patch("processor.GoogleManager")
+    mock_google_cls = mocker.patch("telegram_transcriber.processor.GoogleManager")
     mock_google = mock_google_cls.return_value
     mock_google.sync_to_doc = AsyncMock(return_value=True)
 
@@ -65,11 +65,11 @@ async def test_run_sync_stack_paddy_no_google(processor, mocker):
     
     processor.ai.get_structured_output = AsyncMock(return_value=("Paddy Clean", "Analysis"))
     
-    mock_vault_cls = mocker.patch("processor.VaultManager")
+    mock_vault_cls = mocker.patch("telegram_transcriber.processor.VaultManager")
     mock_vault = mock_vault_cls.return_value
     mock_vault.push_to_obsidian.return_value = True
 
-    mock_google_cls = mocker.patch("processor.GoogleManager")
+    mock_google_cls = mocker.patch("telegram_transcriber.processor.GoogleManager")
     mock_google = mock_google_cls.return_value
     mock_google.sync_to_doc = AsyncMock(return_value=True)
 

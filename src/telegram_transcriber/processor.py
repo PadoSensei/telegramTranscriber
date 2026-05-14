@@ -1,12 +1,12 @@
 import os
 import logging
 import asyncio
-from vault_manager import VaultManager
-from google_manager import GoogleManager
-from ai_engine import AIEngine
-from templates import MediaTemplate
-from bot_utils import validate_media_file
-from exceptions import MediaIngestionError, TelegramDownloadError, GitPersistenceError
+from .vault_manager import VaultManager
+from .google_manager import GoogleManager
+from .ai_engine import AIEngine
+from .templates import MediaTemplate
+from .bot_utils import validate_media_file
+from .exceptions import MediaIngestionError, TelegramDownloadError, GitPersistenceError
 
 logger = logging.getLogger(__name__)
 

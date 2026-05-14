@@ -11,12 +11,16 @@ from telegram.error import NetworkError
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
-from config import VAULT_CONFIGS, get_user_config, HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, HTTP_WRITE_TIMEOUT
-from bot_utils import restricted, parse_vault_request, send_large_message, validate_media_file
-from exceptions import MediaIngestionError, TelegramDownloadError, GitPersistenceError
-from transcriber import Transcriber, HallucinationError
-from factory import ManagerFactory
-from state_manager import StateManager
+from .config import (
+    VAULT_CONFIGS, get_user_config,
+    HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, HTTP_WRITE_TIMEOUT,
+    MEDIA_GROUP_DEBOUNCE_TIME
+)
+from .bot_utils import restricted, parse_vault_request, send_large_message, validate_media_file
+from .exceptions import MediaIngestionError, TelegramDownloadError, GitPersistenceError
+from .transcriber import Transcriber, HallucinationError
+from .factory import ManagerFactory
+from .state_manager import StateManager
 
 # --- 1. SETUP ---
 load_dotenv()
@@ -291,10 +295,10 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def debounced_ingest_group(media_group_id: str, user_id: int, context: ContextTypes.DEFAULT_TYPE):
     """
-    Waits for 1.5s of silence for a media group before processing all items at once.
+    Waits for silence for a media group before processing all items at once.
     """
     try:
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(MEDIA_GROUP_DEBOUNCE_TIME)
 
         # Retrieve and clear from tracking
         group_data = _media_groups_processing.pop(media_group_id, None)
@@ -310,21 +314,28 @@ async def debounced_ingest_group(media_group_id: str, user_id: int, context: Con
 
         results = await processor.ingest_media_group(user_cfg, updates, context)
 
+        # Defensive check for results
+        if not isinstance(results, dict) or 'succeeded' not in results:
+            logger.error(f"Invalid results from ingest_media_group: {results}")
+            await status_msg.edit_text("❌ An internal error occurred while processing your media group. Please try again or contact the admin if the issue persists.")
+            return
+
         # Consolidated Feedback
-        succeeded = results['succeeded']
-        failed = results['failed']
-        total = results['total_files']
+        succeeded = results.get('succeeded', 0)
+        failed = results.get('failed', 0)
+        total = results.get('total_files', 0)
+        failed_details = results.get('failed_details', [])
 
         if failed == 0:
             await status_msg.edit_text(f"✅ Data Secured! {succeeded} items saved to your Inbox.")
         elif succeeded > 0:
-            first_fail = results['failed_details'][0]
+            first_fail = failed_details[0] if failed_details else {'filename': 'Unknown', 'reason': 'Unknown error'}
             await status_msg.edit_text(
                 f"⚠️ Data Secured! {succeeded} files saved. {failed} files failed "
                 f"(e.g., '{first_fail['filename']}' - {first_fail['reason']}). Please check your vault."
             )
         else:
-            fail_summary = "\n".join([f"- {d['filename']}: {d['reason']}" for d in results['failed_details']])
+            fail_summary = "\n".join([f"- {d.get('filename', 'Unknown')}: {d.get('reason', 'Unknown error')}" for d in failed_details])
             await status_msg.edit_text(f"❌ All items in media group failed:\n{fail_summary}")
 
     except asyncio.CancelledError:
