@@ -1,7 +1,7 @@
 import pytest
 import os
 from unittest.mock import MagicMock, patch
-from transcriber import Transcriber
+from telegram_transcriber.transcriber import Transcriber
 
 @pytest.fixture
 def mock_transcriber(mocker):

@@ -3,7 +3,7 @@ import sys
 import tempfile
 import shutil
 from git import Repo
-from config import VAULT_CONFIGS
+from telegram_transcriber.config import VAULT_CONFIGS
 
 def find_config_by_name(target_name):
     """Searches VAULT_CONFIGS for a entry matching the provided name."""

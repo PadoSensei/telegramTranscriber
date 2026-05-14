@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from main import process_entry
-from schema import UserConfig
+from telegram_transcriber.main import process_entry
+from telegram_transcriber.schema import UserConfig
 
 # Using the placeholder ID for testing
 KATIE_ID = 999999999 
@@ -28,7 +28,7 @@ async def test_katie_routing_logic(input_text, expected_folder, expected_sync, m
     
     # --- SENIOR MOVE: MOCK SECURITY & CONFIG ---
     # We patch the whitelist so the test ID is authorized
-    mocker.patch("bot_utils.ALLOWED_IDS", [KATIE_ID])
+    mocker.patch("telegram_transcriber.bot_utils.ALLOWED_IDS", [KATIE_ID])
     
     mock_cfg = UserConfig(
         name="Katie",
@@ -44,15 +44,15 @@ async def test_katie_routing_logic(input_text, expected_folder, expected_sync, m
     )
 
     # We patch get_user_config to return our mock config
-    mocker.patch("main.get_user_config", return_value=mock_cfg)
+    mocker.patch("telegram_transcriber.main.get_user_config", return_value=mock_cfg)
 
     # --- 1. MOCK SERVICES ---
     # Mock Transcriber (Async)
-    mocker.patch("main.transcriber.get_voice_file", new_callable=AsyncMock, return_value="fake_voice.oga")
-    mocker.patch("main.transcriber.transcribe", new_callable=AsyncMock, return_value=input_text)
+    mocker.patch("telegram_transcriber.main.transcriber.get_voice_file", new_callable=AsyncMock, return_value="fake_voice.oga")
+    mocker.patch("telegram_transcriber.main.transcriber.transcribe", new_callable=AsyncMock, return_value=input_text)
     
     # Mock the Processor (Async)
-    mock_processor = mocker.patch("main.processor.run_sync_stack", new_callable=AsyncMock)
+    mock_processor = mocker.patch("telegram_transcriber.main.processor.run_sync_stack", new_callable=AsyncMock)
     mock_processor.return_value = ("Clean Text", "Analysis Output", True, True)
     
     # Mock Telegram Update & Context

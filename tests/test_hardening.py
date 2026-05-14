@@ -4,12 +4,12 @@ import git.exc
 import os
 import shutil
 from unittest.mock import AsyncMock, MagicMock, patch, mock_open
-from exceptions import MediaIngestionError, GitPersistenceError, TelegramDownloadError
-from vault_manager import VaultManager
-from processor import TaskProcessor
-from bot_utils import validate_media_file
-from templates import MediaTemplate
-import main
+from telegram_transcriber.exceptions import MediaIngestionError, GitPersistenceError, TelegramDownloadError
+from telegram_transcriber.vault_manager import VaultManager
+from telegram_transcriber.processor import TaskProcessor
+from telegram_transcriber.bot_utils import validate_media_file
+from telegram_transcriber.templates import MediaTemplate
+from telegram_transcriber import main
 
 @pytest.fixture
 def user_cfg():
@@ -84,7 +84,7 @@ async def test_processor_ingest_single_media_persistence_failure(user_cfg, mocke
     # Mock VaultManager.secure_media to raise GitPersistenceError
     mock_vault = MagicMock()
     mock_vault.secure_media.side_effect = GitPersistenceError("Push failed")
-    mocker.patch("processor.VaultManager", return_value=mock_vault)
+    mocker.patch("telegram_transcriber.processor.VaultManager", return_value=mock_vault)
 
     file_info = {'original_name': 'test.jpg', 'file_name': 'test.jpg', 'mime_type': 'image/jpeg', 'file_size': 100, 'timestamp': '2024'}
 
@@ -97,7 +97,7 @@ def test_validate_media_file_size_error():
     message = MagicMock()
     message.document = MagicMock(file_size=25 * 1024 * 1024, file_name="large.zip", mime_type="application/zip")
 
-    with patch("bot_utils.MAX_FILE_SIZE_MB", 20):
+    with patch("telegram_transcriber.bot_utils.MAX_FILE_SIZE_MB", 20):
         is_valid, info, error = validate_media_file(message)
 
     assert is_valid is False
@@ -108,18 +108,18 @@ def test_validate_media_file_size_error():
 @pytest.mark.asyncio
 async def test_process_media_error_handling(mocker):
     # Authorized user
-    mocker.patch("bot_utils.ALLOWED_IDS", [123])
+    mocker.patch("telegram_transcriber.bot_utils.ALLOWED_IDS", [123])
     mock_update = MagicMock()
     mock_update.effective_user.id = 123
     mock_update.message.media_group_id = None
     mock_update.message.reply_text = AsyncMock()
 
     # Mock validation to succeed
-    mocker.patch("main.validate_media_file", return_value=(True, {'original_name': 'test.jpg', 'file_id': 'id', 'file_name': 'test.jpg'}, None))
-    mocker.patch("main.get_user_config")
+    mocker.patch("telegram_transcriber.main.validate_media_file", return_value=(True, {'original_name': 'test.jpg', 'file_id': 'id', 'file_name': 'test.jpg'}, None))
+    mocker.patch("telegram_transcriber.main.get_user_config")
 
     # Mock processor to raise TelegramDownloadError
-    mocker.patch("main.processor.ingest_single_media", side_effect=TelegramDownloadError("Down"))
+    mocker.patch("telegram_transcriber.main.processor.ingest_single_media", side_effect=TelegramDownloadError("Down"))
 
     mock_status_msg = AsyncMock()
     mock_update.message.reply_text.return_value = mock_status_msg
@@ -142,14 +142,14 @@ async def test_process_media_group_partial_failure_feedback(mocker):
         'status_msg': mock_status_msg
     }
 
-    mocker.patch("main.get_user_config")
+    mocker.patch("telegram_transcriber.main.get_user_config")
     results = {
         'total_files': 2,
         'succeeded': 1,
         'failed': 1,
         'failed_details': [{'filename': 'fail.jpg', 'reason': 'Too large'}]
     }
-    mocker.patch("main.processor.ingest_media_group", AsyncMock(return_value=results))
+    mocker.patch("telegram_transcriber.main.processor.ingest_media_group", AsyncMock(return_value=results))
 
     await main.debounced_ingest_group(media_group_id, user_id, mock_context)
 

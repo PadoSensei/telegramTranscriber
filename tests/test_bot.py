@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from config import ALLOWED_IDS
+from telegram_transcriber.config import ALLOWED_IDS
 import os
 
 # --- Test 1: Config Logic ---
@@ -16,7 +16,7 @@ def test_allowed_ids_parsing():
 # We mock the Telegram 'Update' and 'Context' objects
 @pytest.mark.asyncio
 async def test_restricted_decorator_blocks_unauthorized():
-    from main import restricted
+    from telegram_transcriber.main import restricted
     
     # Create a dummy function to protect
     @restricted
@@ -41,7 +41,7 @@ async def test_restricted_decorator_blocks_unauthorized():
 
 @pytest.mark.asyncio
 async def test_restricted_decorator_allows_authorized():
-    from main import restricted
+    from telegram_transcriber.main import restricted
     
     # Create a dummy function to protect
     @restricted
