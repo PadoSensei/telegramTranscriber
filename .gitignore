@@ -6,3 +6,4 @@ temp_*.oga
 katie_OD_Google_Access.json
 bot_state.json
 bot_state.json.lock
+venv/
