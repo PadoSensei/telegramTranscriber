@@ -6,7 +6,7 @@ from datetime import datetime
 from functools import wraps
 from telegram import Update, Message
 from telegram.ext import ContextTypes
-from config import ALLOWED_IDS, MAX_FILE_SIZE_MB, FILE_TYPE_BLACKLIST, MIME_TYPE_BLACKLIST
+from .config import ALLOWED_IDS, MAX_FILE_SIZE_MB, FILE_TYPE_BLACKLIST, MIME_TYPE_BLACKLIST
 
 logger = logging.getLogger(__name__)
 

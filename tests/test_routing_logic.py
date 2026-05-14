@@ -1,6 +1,6 @@
 import pytest
-from bot_utils import parse_vault_request
-from config import VAULT_CONFIGS
+from telegram_transcriber.bot_utils import parse_vault_request
+from telegram_transcriber.config import VAULT_CONFIGS
 
 # Define constants for easier reading
 LUDMILA_ID = 7187182620
@@ -40,7 +40,7 @@ def test_multi_user_routing(user_id, input_text, expected_path):
         user_cfg["category_map"]
     )
 
-    # 2. Mimic the 'Senior Move' logic from main.py 
+    # 2. Mimic the 'Senior Move' logic from telegram_transcriber.main.py
     # (If no hashtag matches, force to 00_Inbox)
     actual_path = target_cat if should_sync else "00_Inbox"
 

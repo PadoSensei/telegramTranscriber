@@ -1,9 +1,9 @@
 import pytest
 from unittest.mock import MagicMock
 from datetime import datetime
-from bot_utils import validate_media_file
-from templates import MediaTemplate
-from config import MAX_FILE_SIZE_MB
+from telegram_transcriber.bot_utils import validate_media_file
+from telegram_transcriber.templates import MediaTemplate
+from telegram_transcriber.config import MAX_FILE_SIZE_MB
 
 def test_validate_media_file_photo():
     message = MagicMock()

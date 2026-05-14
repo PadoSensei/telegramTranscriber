@@ -4,13 +4,14 @@ import logging
 import fasteners
 import datetime
 import time
+from .config import STATE_FILE_PATH
 
 logger = logging.getLogger(__name__)
 
 class StateManager:
-    def __init__(self, filepath="bot_state.json"):
-        self.filepath = filepath
-        self.lock_path = f"{filepath}.lock"
+    def __init__(self, filepath=None):
+        self.filepath = filepath or str(STATE_FILE_PATH)
+        self.lock_path = f"{self.filepath}.lock"
         self.lock = fasteners.InterProcessLock(self.lock_path)
 
     def _load_state(self):

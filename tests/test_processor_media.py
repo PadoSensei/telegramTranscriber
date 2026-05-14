@@ -1,8 +1,8 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from processor import TaskProcessor
-from vault_manager import VaultManager
+from telegram_transcriber.processor import TaskProcessor
+from telegram_transcriber.vault_manager import VaultManager
 
 @pytest.mark.asyncio
 async def test_ingest_single_media(mocker):
@@ -32,7 +32,7 @@ async def test_ingest_single_media(mocker):
     # Mock VaultManager.secure_media (synchronous, called in executor)
     mock_vault = MagicMock()
     mock_vault.secure_media.return_value = "00_Inbox/IMG_123.jpg"
-    mocker.patch("processor.VaultManager", return_value=mock_vault)
+    mocker.patch("telegram_transcriber.processor.VaultManager", return_value=mock_vault)
 
     # Execute
     saved_path = await processor.ingest_single_media(user_cfg, file_info, file_id, mock_context)
@@ -66,7 +66,7 @@ async def test_ingest_media_group_aggregation(mocker):
     mock_ingest_single.side_effect = ["path1", Exception("Git error")]
 
     # Mock validation to always succeed
-    mocker.patch("processor.validate_media_file", return_value=(True, {
+    mocker.patch("telegram_transcriber.processor.validate_media_file", return_value=(True, {
         'file_id': 'id', 'file_name': 'name', 'original_name': 'orig',
         'mime_type': 'mime', 'file_size': 100, 'timestamp': 'time'
     }, None))

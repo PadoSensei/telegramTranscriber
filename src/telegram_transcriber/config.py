@@ -1,8 +1,14 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
-from schema import UserConfig
+from .schema import UserConfig
 
 load_dotenv()
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+STATE_FILE_PATH = PROJECT_ROOT / "config" / "data" / "bot_state.json"
+
+MEDIA_GROUP_DEBOUNCE_TIME = 1.5
 
 # Global HTTP Timeouts for Heavy IO (Transcription downloads/Syncs)
 HTTP_CONNECT_TIMEOUT = 20.0

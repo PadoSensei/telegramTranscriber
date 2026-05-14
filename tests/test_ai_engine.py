@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock
-from ai_engine import AIEngine
+from telegram_transcriber.ai_engine import AIEngine
 
 @pytest.fixture
 def ai_engine(mocker):

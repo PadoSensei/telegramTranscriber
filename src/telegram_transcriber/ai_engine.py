@@ -4,7 +4,7 @@ import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold 
 from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type
 from google.api_core import exceptions
-from templates import STAR_PROMPT, GENERAL_PROMPT
+from .templates import STAR_PROMPT, GENERAL_PROMPT
 
 class AIEngine:
     def __init__(self, api_key=None):
