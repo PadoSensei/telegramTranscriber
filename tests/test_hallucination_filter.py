@@ -21,16 +21,16 @@ async def test_short_content_returns_empty(transcriber, mocker):
     # but that's heavy. Let's mock the return of model.transcribe in _sync_transcribe.
 
     # We'll just test the _sync_transcribe logic directly for efficiency
-    mocker.patch.object(transcriber.model, 'transcribe', return_value={"text": "   yo   "})
+    mocker.patch.object(transcriber.model, 'transcribe', return_value={"text": "   yo   ", "language": "en"})
     mocker.patch('os.path.exists', return_value=False) # Skip cleanup check
 
     result = transcriber._sync_transcribe("fake_path.oga")
-    assert result == "" # "yo" is length 2, should be filtered by len < 3 check
+    assert result["text"] == "" # "yo" is length 2, should be filtered by len < 3 check
 
 @pytest.mark.asyncio
 async def test_valid_content_passes(transcriber, mocker):
-    mocker.patch.object(transcriber.model, 'transcribe', return_value={"text": "This is a valid long sentence that should pass."})
+    mocker.patch.object(transcriber.model, 'transcribe', return_value={"text": "This is a valid long sentence that should pass.", "language": "en"})
     mocker.patch('os.path.exists', return_value=False)
 
     result = transcriber._sync_transcribe("fake_path.oga")
-    assert result == "This is a valid long sentence that should pass."
+    assert result["text"] == "This is a valid long sentence that should pass."

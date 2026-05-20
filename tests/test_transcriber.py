@@ -30,12 +30,13 @@ async def test_get_voice_file(mock_transcriber, mocker):
 @pytest.mark.asyncio
 async def test_transcribe_and_cleanup(mock_transcriber, mocker):
     # Mock the internal transcription logic
-    mock_transcriber.model.transcribe.return_value = {"text": "Hello world"}
+    mock_transcriber.model.transcribe.return_value = {"text": "Hello world", "language": "en"}
     mocker.patch("os.path.exists", return_value=True)
     mocker.patch("os.remove")
 
-    text = await mock_transcriber.transcribe("fake_path.oga")
+    result = await mock_transcriber.transcribe("fake_path.oga")
     
-    assert text == "Hello world"
+    assert result["text"] == "Hello world"
+    assert result["language"] == "en"
     # Verify cleanup was called
     os.remove.assert_called_once_with("fake_path.oga")

@@ -66,7 +66,7 @@ def system_check():
     logger.info("🚀 System Diagnostics Passed. Bot is ready to boot.")
 
 # Initialize Services
-transcriber = Transcriber(model_name="tiny") 
+transcriber = Transcriber(model_name="base")
 state_manager = StateManager()
 processor = ManagerFactory.get_processor()
 
@@ -129,7 +129,8 @@ async def process_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"[USER:{user_id}] Downloading/Transcribing audio...")
             try:
                 temp_path = await transcriber.get_voice_file(update, context)
-                raw_content = await transcriber.transcribe(temp_path)
+                transcription_result = await transcriber.transcribe(temp_path)
+                raw_content = transcription_result.get("text", "")
             except HallucinationError:
                 await status_msg.edit_text("I caught some background noise, but nothing clear enough to save.")
                 return

@@ -2,6 +2,7 @@ import os
 import asyncio
 import whisper
 import logging
+import torch
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
@@ -12,12 +13,16 @@ class HallucinationError(Exception):
     pass
 
 class Transcriber:
-    def __init__(self, model_name="tiny", device="cpu"):
+    def __init__(self, model_name="base", device=None):
         """
         Initializes the Whisper model once on startup.
         'tiny' is best for speed on CPU; 'base' is better for accuracy.
+        The 'base' model requires approximately 250MB of RAM.
         """
-        logger.info(f"⏳ Loading Whisper model ({model_name})...")
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        logger.info(f"⏳ Loading Whisper model ({model_name}) on {device}...")
         self.model = whisper.load_model(model_name, device=device)
         self.executor = ThreadPoolExecutor(max_workers=1) 
         logger.info("✅ Whisper Transcriber Ready")
@@ -45,8 +50,8 @@ class Transcriber:
 
     def _sync_transcribe(self, file_path: str):
         """
-        Synchronous wrapper for the heavy Whisper CPU work.
-        Includes hallucination filtering for common 'tiny' model artifacts.
+        Synchronous wrapper for the heavy Whisper work.
+        Includes hallucination filtering for common artifacts.
         """
         try:
             logger.info(f"🎙️ [Whisper] Transcribing: {file_path}")
@@ -62,10 +67,19 @@ class Transcriber:
             # If > 10KB, it's likely > 3 seconds.
             is_long_audio = file_size > 10000
 
-            result = self.model.transcribe(file_path, fp16=False)
+            result = self.model.transcribe(
+                file_path,
+                fp16=False,
+                beam_size=5,
+                best_of=5,
+                task="transcribe"
+            )
             text = result.get("text", "").strip()
+            detected_lang = result.get("language", "unknown")
 
-            # HEURISTIC_BLACKLIST: Whisper 'tiny' often outputs these on silence or static
+            logger.info(f"🌍 Detected Language: {detected_lang}")
+
+            # HEURISTIC_BLACKLIST: Whisper often outputs these on silence or static
             hallucinations = [
                 "Thank you for watching",
                 "Visit us",
@@ -109,25 +123,27 @@ class Transcriber:
             # 3. Short capture check
             if len(text.strip()) < 3:
                 logger.info(f"🔈 Captured noise or too short: '{text}'")
-                return ""
+                return {"text": "", "language": detected_lang}
 
-            return text
+            return {"text": text, "language": detected_lang}
+        except HallucinationError:
+            raise
         except Exception as e:
             logger.error(f"❌ Whisper Error: {e}")
-            return ""
+            return {"text": "", "language": "unknown"}
 
     async def transcribe(self, file_path: str):
         """
         Async entry point for transcription. 
-        Runs the CPU-heavy work in a thread to keep the bot responsive.
+        Runs the heavy model work in a thread to keep the bot responsive.
         """
         loop = asyncio.get_event_loop()
-        text = await loop.run_in_executor(self.executor, self._sync_transcribe, file_path)
+        result = await loop.run_in_executor(self.executor, self._sync_transcribe, file_path)
         
         # Cleanup: Delete the temp file immediately after transcription
         self.cleanup(file_path)
         
-        return text
+        return result
 
     def cleanup(self, file_path: str):
         """Removes the temporary audio file."""
