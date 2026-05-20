@@ -35,7 +35,7 @@ async def test_global_inbox_routing_logic(input_text, expected_folder, mocker):
 
     # Mock Transcriber
     mocker.patch("telegram_transcriber.main.transcriber.get_voice_file", new_callable=AsyncMock, return_value="fake_voice.oga")
-    mocker.patch("telegram_transcriber.main.transcriber.transcribe", new_callable=AsyncMock, return_value=input_text)
+    mocker.patch("telegram_transcriber.main.transcriber.transcribe", new_callable=AsyncMock, return_value={"text": input_text, "language": "en"})
     
     # Mock the Processor
     mock_processor = mocker.patch("telegram_transcriber.main.processor.run_sync_stack", new_callable=AsyncMock)
