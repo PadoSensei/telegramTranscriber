@@ -9,7 +9,7 @@ class UserConfig(BaseModel):
     repo_url: str
     token: str
     username: str
-    category_map: Dict[str, str]
+    category_map: Optional[Dict[str, str]] = Field(default_factory=dict)
     gdrive_doc_id: Optional[str] = None
     gcp_json_content: Optional[str] = None
 

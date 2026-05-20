@@ -30,48 +30,17 @@ def restricted(func):
     return wrapped
 
 # --- 2. INTENT & CATEGORY PARSING ---
-def parse_vault_request(text, user_map):
+def parse_vault_request(text, user_map=None):
     """
-    Identifies intent based on the specific user's category map.
+    Global Inbox-Only Routing.
+    Every message processed by the bot is now automatically synced to the Inbox.
     Returns: (bool: should_sync, str: path, str: tag_name, str: warning)
     """
-    if not text:
+    if not text or len(text.strip()) < 2:
         return False, None, None, None
     
-    text_lower = text.lower()
-    known_tags = list(user_map.keys()) # e.g., ['Star', 'Bloom', 'Source', 'Inbox']
-    
-    # 1. Check for hashtags that match our Category Map (Explicit Sync)
-    # This allows Katie to just say "#star" to trigger a sync
-    tags_in_text = re.findall(r"#(\w+)", text_lower)
-    found_tag = None
-    
-    for t in tags_in_text:
-        # Match case-insensitive against the keys in config.py
-        match = next((k for k in known_tags if k.lower() == t), None)
-        if match:
-            found_tag = match
-            break
-
-    # 2. If no matching hashtag, check for "2nd brain" keywords (Implicit Sync)
-    if not found_tag:
-        # Look for "#2ndbrain", "2nd brain", or "second brain"
-        sync_trigger = r"(#?2nd\s?brain|#?second\s?brain)"
-        if not re.search(sync_trigger, text_lower):
-            return False, None, None, None
-        
-        # If "2nd brain" is mentioned but no tag found, default to Inbox
-        found_tag = "Inbox"
-
-    # 3. Finalize the target path
-    target_path = user_map.get(found_tag, "00_Inbox")
-    
-    # Optional warning if they used a tag not in their map
-    warning = None
-    if found_tag == "Inbox" and not any(tag.lower() in text_lower for tag in known_tags):
-        warning = "💡 *Tip:* Use `#star` or `#bloom` to sort this automatically next time."
-
-    return True, target_path, found_tag, warning
+    # Global Policy: Always sync to Inbox, no hashtags or keywords required.
+    return True, "00_Inbox", "Inbox", None
 
 # --- 3. TEXT CLEANING ---
 def get_clean_content(text):
