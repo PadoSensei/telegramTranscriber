@@ -19,7 +19,6 @@ class VaultManager:
         self.token = token
         self.username = username
         # Unique temp directory per user to avoid collision during parallel processing
-        # Add a short unique suffix to avoid collision in high-concurrency scenarios
         self.temp_dir = f"temp_vault_{username}_{datetime.now().strftime('%H%M%S%f')}"
         
         # Format URL with token for silent HTTPS authentication
@@ -48,38 +47,38 @@ class VaultManager:
             except git.exc.GitCommandError as e:
                 raise GitPersistenceError(f"Failed to clone repository: {str(e)}")
 
-            # 3. DIRECTORY PREP (Always 00_Inbox for now)
+            # 3. DIRECTORY PREP (99_System/Attachments for media)
             target_category = "00_Inbox"
-            full_folder_path = os.path.join(self.temp_dir, target_category)
+            attachment_dir = os.path.join(self.temp_dir, "99_System", "Attachments")
+            inbox_dir = os.path.join(self.temp_dir, target_category)
+
             try:
-                os.makedirs(full_folder_path, exist_ok=True)
+                os.makedirs(attachment_dir, exist_ok=True)
+                os.makedirs(inbox_dir, exist_ok=True)
             except OSError as e:
-                raise GitPersistenceError(f"Failed to create directory: {str(e)}")
+                raise GitPersistenceError(f"Failed to create directories: {str(e)}")
 
             # 4. WRITE BINARY FILE
-            media_path = os.path.join(full_folder_path, filename)
+            media_path = os.path.join(attachment_dir, filename)
             try:
                 with open(media_path, 'wb') as f:
                     f.write(media_content_bytes)
             except IOError as e:
                 raise GitPersistenceError(f"Failed to write media file: {str(e)}")
 
-            # 5. WRITE METADATA FILE
+            # 5. WRITE METADATA FILE (in 00_Inbox)
             metadata_filename = f"{filename}.md"
-            metadata_path = os.path.join(full_folder_path, metadata_filename)
+            metadata_path = os.path.join(inbox_dir, metadata_filename)
             try:
                 with open(metadata_path, 'w', encoding='utf-8') as f:
                     f.write(metadata_content)
             except IOError as e:
                 raise GitPersistenceError(f"Failed to write metadata file: {str(e)}")
 
-            # 6. DISCOVERY (Optional but kept for consistency)
-            self._discover_new_folders(repo)
-
-            # 7. COMMIT & PUSH
+            # 6. COMMIT & PUSH
             try:
                 repo.git.add(A=True)
-                commit_msg = f"Media Ingest: {filename} via 2ndBrain Bot"
+                commit_msg = f"Media Ingest: {filename} via Knowledge Ingestion Engine"
                 repo.index.commit(commit_msg)
 
                 origin = repo.remote(name='origin')
@@ -87,80 +86,62 @@ class VaultManager:
             except git.exc.GitCommandError as e:
                 raise GitPersistenceError(f"Git operation failed: {str(e)}")
 
-            relative_path = os.path.join(target_category, filename)
+            relative_path = os.path.join("99_System", "Attachments", filename)
             logger.info(f"[USER:{self.username}] ✅ Media secured successfully: {relative_path}")
             return relative_path
 
         except GitPersistenceError:
-            raise # Re-raise our custom exception
+            raise
         except Exception as e:
             logger.error(f"[USER:{self.username}] ❌ secure_media Unexpected Error: {str(e)}")
             raise GitPersistenceError(f"An unexpected error occurred during persistence: {str(e)}")
         finally:
             self._cleanup()
 
-    def push_to_obsidian(self, target_category, target_project, clean_transcript, analysis_output):
+    def push_to_obsidian(self, entry, input_type="voice"):
         """
-        Clones, verifies paths, updates, and pushes a Markdown entry to the specific GitHub vault.
+        Clones, updates, and pushes a Markdown entry to the 00_Inbox/YYYY-MM-DD.md file.
         """
         try:
-            logger.info(f"[USER:{self.username}] Starting vault sync for project: {target_project}")
+            logger.info(f"[USER:{self.username}] Starting vault sync to Inbox")
             
-            # 1. CLEANUP PREVIOUS RUNS: Ensure workspace is clear
+            # 1. CLEANUP PREVIOUS RUNS
             if os.path.exists(self.temp_dir):
                 shutil.rmtree(self.temp_dir)
 
-            # 2. CLONE: Pull the latest state from GitHub
+            # 2. CLONE
             logger.info(f"[USER:{self.username}] Cloning repository...")
             repo = Repo.clone_from(self.auth_url, self.temp_dir)
             
-            # 3. PATH RESILIENCY: Verify if the category folder exists in the actual vault
-            # If Katie renamed '01_Interviews' to 'Work/Interviews' in Obsidian, 
-            # os.path.exists will fail, and we fallback to '00_Inbox' to prevent breaking the structure.
+            # 3. PATH PREP
+            target_category = "00_Inbox"
             full_folder_path = os.path.join(self.temp_dir, target_category)
-            
-            if not os.path.isdir(full_folder_path):
-                logger.warning(
-                    f"[USER:{self.username}] PATH MISMATCH: Folder '{target_category}' not found in repo. "
-                    f"Redirecting entry to '00_Inbox' to prevent lost data."
-                )
-                target_category = "00_Inbox"
-                full_folder_path = os.path.join(self.temp_dir, target_category)
-
-            # Ensure the directory exists (creates 00_Inbox if it was missing too)
             os.makedirs(full_folder_path, exist_ok=True)
 
-            # 4. FILE PREPARATION: Obsidian Daily Note Style (YYYY-MM-DD.md)
+            # 4. FILE PREPARATION
             date_str = datetime.now().strftime('%Y-%m-%d')
             file_name = f"{date_str}.md"
             file_path = os.path.join(full_folder_path, file_name)
 
-            # Determine if this is a STAR story for specialized formatting
-            is_star = "STAR_Story_Bank" in target_category or "#star" in clean_transcript.lower()
-
             # 5. WRITE/APPEND LOGIC
-            # If file doesn't exist, initialize it with Frontmatter
             if not os.path.exists(file_path):
                 logger.info(f"[USER:{self.username}] Creating new daily note: {file_name}")
                 with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(NoteTemplate.get_frontmatter(target_project, self.username))
+                    f.write(NoteTemplate.get_frontmatter("Unsorted", self.username))
 
-            # Append the new entry
+            # Append the new entry with double newline before to prevent formatting bleed
             with open(file_path, 'a', encoding='utf-8') as f:
-                f.write(NoteTemplate.format_entry(clean_transcript, analysis_output, is_star=is_star))
+                f.write("\n\n" + entry)
 
-            # 5.5 DISCOVERY MODE: Scan for new folders to suggest hashtags
-            self._discover_new_folders(repo)
-
-            # 6. GIT PUSH: Commit and sync back to GitHub
+            # 6. GIT PUSH
             repo.git.add(A=True)
-            commit_msg = f"Capture: {target_project} via 2ndBrain Bot"
+            commit_msg = f"Capture: {input_type} via Knowledge Ingestion Engine"
             repo.index.commit(commit_msg)
             
             origin = repo.remote(name='origin')
             origin.push()
             
-            logger.info(f"[USER:{self.username}] ✅ Successfully pushed to GitHub (Path: {target_category})")
+            logger.info(f"[USER:{self.username}] ✅ Successfully pushed to GitHub Inbox")
             return True
 
         except Exception as e:
@@ -169,33 +150,7 @@ class VaultManager:
         finally:
             self._cleanup()
 
-    def _discover_new_folders(self, repo):
-        """
-        Scans the repository for folders and suggests new hashtags if they aren't in mapping.
-        """
-        try:
-            ignore_dirs = {'.git', '.obsidian', '.trash', 'attachments'}
-            found_folders = []
-            for root, dirs, files in os.walk(self.temp_dir):
-                # Filter out hidden/ignored directories
-                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ignore_dirs]
-                for d in dirs:
-                    # We want the relative path from the repo root
-                    rel_path = os.path.relpath(os.path.join(root, d), self.temp_dir)
-                    found_folders.append(rel_path)
-
-            # Internal mapping update: Update bot_state.json with discovered folders
-            from .state_manager import StateManager
-            state = StateManager()
-            state.set_discovered_folders(self.username, found_folders)
-
-            logger.info(f"[USER:{self.username}] Discovery Mode found {len(found_folders)} folders. Mapping updated.")
-
-        except Exception as e:
-            logger.error(f"Discovery Mode failed: {e}")
-
     def _cleanup(self):
-        # 7. FINAL CLEANUP: Critical for Railway to prevent "Disk Full" errors
         if os.path.exists(self.temp_dir):
                 try:
                     shutil.rmtree(self.temp_dir)
