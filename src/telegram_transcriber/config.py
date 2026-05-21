@@ -33,57 +33,40 @@ MIME_TYPE_BLACKLIST = [
 # ==========================================
 # MULTI-TENANT VAULT CONFIGURATIONS
 # ==========================================
-# Maps Telegram User IDs to their specific GitHub Repositories 
-# and their unique folder structures (Category Maps).
+# Maps Telegram User IDs to their specific GitHub Repositories.
 
 VAULT_CONFIGS = {
-    
- # --------------------------------------
-    # LUDMILA'S VAULT (2ndBrain Repo)
-    # --------------------------------------
+    # LUDMILA'S VAULT
     7187182620: {  
         "name": "Ludmila",
         "repo_url": os.getenv("LUDMILA_REPO_URL", ""),
         "token":    os.getenv("LUDMILA_TOKEN", ""),
         "username": os.getenv("LUDMILA_NAME", ""),
-        
-        # SYNCED MAPPING: Matches her "📥 TelegramCaptures" structure
         "category_map": {}, 
         "gdrive_doc_id": None
     },
     
-    # --------------------------------------
-    # PADOSENSEI'S VAULT (DevBrain Repo)
-    # --------------------------------------
+    # PADOSENSEI'S VAULT
     6426489405: {  
         "name": "PadoSensei",
         "repo_url": os.getenv("PADO_REPO_URL"),
         "token": os.getenv("PADO_TOKEN"),
         "username": os.getenv("PADO_NAME"),
-        
-        # Pado's specific project routing (Projects live in '03_Projects')
         "category_map": {}, 
         "gdrive_doc_id": None
     },
 
-
-    # --------------------------------------
-    # KATIE O'DONOGHUE'S VAULT (Bloom Interview Prep)
-    # --------------------------------------
-    
-    # If she messages the bot, the logs will show "Unauthorized access attempt by ID: XXXXXXX"
+    # KATIE O'DONOGHUE'S VAULT
     8630747869: {  
         "name": "katie_OD",
         "repo_url": os.getenv("KATIE_OD_REPO_URL"),
         "token": os.getenv("KATIE_OD_TOKEN"),
         "username": os.getenv("KATIE_OD_NAME"),
-        "gdrive_doc_id": os.getenv("KATIE_OD_GOOGLE_DRIVE"),
-        
-        
+        "gdrive_doc_id": None,
+        "category_map": {}
     }
 }
 
-# Keep this list dynamic for the @restricted security decorator in main.py
 ALLOWED_IDS = list(VAULT_CONFIGS.keys())
 
 def get_user_config(user_id: int) -> UserConfig:
@@ -94,14 +77,4 @@ def get_user_config(user_id: int) -> UserConfig:
     if not cfg_dict:
         raise ValueError(f"User {user_id} not authorized.")
 
-    # Create a copy to avoid mutating the global VAULT_CONFIGS directly before validation
-    cfg_to_validate = cfg_dict.copy()
-
-    # We can also inject per-user GCP content from env if it's missing in the dict
-    user_name = cfg_to_validate.get("name")
-    if user_name and not cfg_to_validate.get("gcp_json_content"):
-        # Fallback to a naming convention or a specific env var if needed
-        env_key = f"{user_name.upper()}_GCP_JSON"
-        cfg_to_validate["gcp_json_content"] = os.getenv(env_key)
-
-    return UserConfig(**cfg_to_validate)
+    return UserConfig(**cfg_dict)

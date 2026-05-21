@@ -1,10 +1,10 @@
+# processor.py
 import os
 import logging
 import asyncio
 from .vault_manager import VaultManager
-from .google_manager import GoogleManager
 from .ai_engine import AIEngine
-from .templates import MediaTemplate
+from .templates import MediaTemplate, NoteTemplate
 from .bot_utils import validate_media_file
 from .exceptions import MediaIngestionError, TelegramDownloadError, GitPersistenceError
 
@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 class TaskProcessor:
     def __init__(self):
-        # AI Engine can be shared as it's typically a thread-safe client or stateless
         self.ai = AIEngine(api_key=os.getenv("GEMINI_API_KEY"))
 
     async def ingest_single_media(self, user_cfg, file_info: dict, file_id: str, context, status_msg=None) -> str:
@@ -32,7 +31,7 @@ class TaskProcessor:
             logger.error(f"❌ [USER:{user_name}] Telegram download failed: {e}", exc_info=True)
             raise TelegramDownloadError(f"Failed to download your file from Telegram: {str(e)}")
 
-        # Optional: Update status to "Securing" for visibility
+        # Update status to "Securing"
         if status_msg:
             try:
                 await status_msg.edit_text(f"📦 Securing '{file_info['original_name']}' to Vault...")
@@ -85,26 +84,20 @@ class TaskProcessor:
         }
 
         for update in updates:
-            # 1. Validate each file in the group
             is_valid, file_info, error_message = validate_media_file(update.message)
 
             if not is_valid:
                 logger.warning(f"❌ Validation failed for a file in group: {error_message}")
                 results['failed'] += 1
-                # Try to get a filename for the failure report
                 fname = "Unknown"
                 if update.message.document: fname = update.message.document.file_name
                 elif update.message.video: fname = update.message.video.file_name
                 results['failed_details'].append({'filename': fname, 'reason': error_message})
                 continue
 
-            # Add caption if present
             file_info['caption'] = update.message.caption
 
-            # 2. Ingest
             try:
-                # We don't pass status_msg to group ingestion items to avoid message editing spam/conflicts
-                # unless we want to update the group message with "Securing item X of Y"
                 saved_path = await self.ingest_single_media(user_cfg, file_info, file_info['file_id'], context)
                 results['succeeded'] += 1
                 results['saved_files'].append(file_info['original_name'])
@@ -115,63 +108,23 @@ class TaskProcessor:
 
         return results
 
-    async def run_sync_stack(self, user_cfg, category, project, text):
+    async def run_sync_stack(self, user_cfg, text, input_type="voice"):
         """
-        Coordinates AI transformation and parallel persistence.
-        Ensures absolute tenant isolation by instantiating Managers locally.
+        Coordinates AI transformation and persistence to Obsidian Inbox.
         """
         user_name = user_cfg.name
-        logger.info(f"🔄 [USER:{user_name}] Starting sync stack for project: {project}")
+        logger.info(f"🔄 [USER:{user_name}] Starting sync stack (Type: {input_type})")
 
-        # Determine if we should use STAR story prompt
-        is_star = "Star" in category or "STAR_Story_Bank" in category
+        # 1. AI Transformation
+        clean_text, analysis = await self.ai.get_structured_output(text)
         
-        # 1. AI Transformation (Gemini 2.0 Flash)
-        clean_text, analysis = await self.ai.get_structured_output(text, user_name, is_star)
-        
-        # 2. Local Service Instantiation (Isolated per request - Factory Pattern)
-        # These are local variables, ensuring they are not shared between concurrent requests.
+        # 2. Entry Formatting
+        entry = NoteTemplate.format_entry(clean_text, analysis, input_type=input_type)
+
+        # 3. Vault Persistence
         vault = VaultManager(user_cfg.repo_url, user_cfg.token, user_cfg.username)
-        google = GoogleManager(gcp_json_content=user_cfg.gcp_json_content)
-
-        # 3. Setup Persistence Tasks
-        has_google = user_cfg.gdrive_doc_id is not None
         loop = asyncio.get_running_loop()
         
-        # Start GitHub sync (Always required)
-        git_task = loop.run_in_executor(None, vault.push_to_obsidian, category, project, clean_text, analysis)
+        git_success = await loop.run_in_executor(None, vault.push_to_obsidian, entry, input_type)
 
-        # Start Google sync (Optional)
-        google_task = None
-        if has_google:
-            logger.info(f"🔗 Google Sync enabled for {user_name}")
-            google_task = google.sync_to_doc(user_cfg.gdrive_doc_id, project, clean_text, analysis, user_name)
-        else:
-            logger.info(f"⏭️ Skipping Google Sync for {user_name} (No Doc ID)")
-
-        # 4. Parallel Sync Execution
-        tasks = [git_task]
-        if google_task:
-            tasks.append(google_task)
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # 5. Independent Success Evaluation
-        git_success = False
-        google_success = True # Default to True if not configured
-
-        # Evaluate Git Result (always index 0)
-        if isinstance(results[0], Exception):
-            logger.error(f"❌ GitHub Sync error for {user_name}: {results[0]}")
-        else:
-            git_success = results[0]
-
-        # Evaluate Google Result (index 1 if exists)
-        if google_task:
-            if isinstance(results[1], Exception):
-                logger.error(f"❌ Google Sync error for {user_name}: {results[1]}")
-                google_success = False
-            else:
-                google_success = results[1]
-
-        return clean_text, analysis, git_success, google_success
+        return clean_text, analysis, git_success

@@ -4,31 +4,19 @@ from datetime import datetime
 # 1. AI PROMPTS (Instruction Layer)
 # ==========================================
 
-STAR_PROMPT = """
-You are Katie O’Donoghue's Elite Interview Coach and Brand Strategy Consultant.
-The user is preparing for the 'Bloom Brand and Events Manager' role at Bord Bia.
+INGESTION_PROMPT = """
+You are an expert Knowledge Manager. Your task is to clean up the provided transcript or text for grammar, clarity, and readability while maintaining the original intent and tone.
 
-TASK:
-1. Transform the raw transcript into a high-impact, professional STAR story.
-2. Structure into: **S**ituation, **T**ask, **A**ction, and **Result**.
-3. Focus on stakeholder management, ROI, and consumer-led experiences.
+Please provide:
+1. A polished, grammatically correct version of the content.
+2. A concise 2-sentence summary of the core message.
+3. Exactly 3 actionable next steps or key takeaways derived from the content.
 
 FORMATTING RULES:
 - Use clean Markdown.
-- Separate the polished story from the strategic analysis using: '---ANALYSIS_SPLIT---'
+- Separate the polished content from the summary and action items using the exact marker: '---ANALYSIS_SPLIT---'
 
-TRANSCRIPT:
-{content}
-"""
-
-GENERAL_PROMPT = """
-You are an expert Knowledge Manager. Clean up this transcript for grammar and readability.
-Maintain the original intent. Provide a brief analysis and 3 action items.
-
-FORMATTING RULES:
-- Separate the polished text from the analysis using: '---ANALYSIS_SPLIT---'
-
-TRANSCRIPT:
+CONTENT:
 {content}
 """
 
@@ -38,36 +26,31 @@ TRANSCRIPT:
 
 class NoteTemplate:
     @staticmethod
-    def get_frontmatter(project, user_name="User"):
-        """Generates valid YAML frontmatter with dynamic tags."""
+    def get_frontmatter(project="Unsorted", user_name="User"):
+        """Generates valid YAML frontmatter for the daily inbox file."""
         date_str = datetime.now().strftime('%Y-%m-%d')
         return (
             "---\n"
             f"owner: {user_name}\n"
             f"date: {date_str}\n"
-            f"project: {project}\n"
-            f"tags: [2ndbrain, {project.lower()}]\n"
-            "status: processed\n"
+            "status: unrouted\n"
             "---\n\n"
-            f"# 📥 {project} Captures\n\n"
+            f"# 📥 Inbox Captures ({date_str})\n\n"
         )
 
     @staticmethod
-    def format_entry(clean_transcript, analysis_output, is_star=False):
+    def format_entry(clean_content, analysis_output, input_type="voice"):
         """
-        Formats the entry using Obsidian Callouts for high-readability.
-        Ideal for mobile review during travel.
+        Formats the entry with machine-parsable delimiters and Obsidian callouts.
         """
         timestamp = datetime.now().strftime('%H:%M:%S')
-        icon = "🌟" if is_star else "📝"
-        title = "STAR Story" if is_star else "Transcript"
-        
         return (
-            f"## {icon} {title} ({timestamp})\n\n"
-            f"> [!ABSTRACT] Polished Content\n"
-            f"{clean_transcript}\n\n"
-            f"> [!LIGHTBULB] Second Brain Analysis\n"
-            f"{analysis_output}\n\n"
+            f"\n# CAPTURE_START\n"
+            f"## Capture ({timestamp})\n"
+            f"- **Input Type**: {input_type}\n\n"
+            f"> [!ABSTRACT] Polished Content\n{clean_content}\n\n"
+            f"> [!LIGHTBULB] Analysis & Actions\n{analysis_output}\n\n"
+            f"# CAPTURE_END\n"
             "--- \n"
         )
 
@@ -76,7 +59,6 @@ class MediaTemplate:
     def get_metadata_content(filename, original_name, mime_type, file_size, caption, timestamp):
         """
         Generates content for the companion .md file for media attachments.
-        Includes frontmatter and an Obsidian link to the binary file.
         """
         size_mb = file_size / (1024 * 1024)
 
@@ -87,6 +69,7 @@ class MediaTemplate:
             f"size_bytes: {file_size}\n"
             f"size_mb: {size_mb:.2f}\n"
             f"ingested_at: {timestamp}\n"
+            f"status: unrouted\n"
             "---\n\n"
             f"# 📎 Media Attachment: {original_name}\n\n"
             f"![[{filename}]]\n\n"
