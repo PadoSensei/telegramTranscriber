@@ -2,7 +2,7 @@ name: CI Quality Gate
 
 on:
   push:
-    branches: [ main, master, resiliency-and-isolation ]
+    branches: [ main, master, resiliency-and-isolation, refactor/knowledge-ingestion-engine* ]
   pull_request:
     branches: [ main, master ]
 
@@ -28,7 +28,7 @@ jobs:
     - name: Import Sanity Check
       run: |
         export PYTHONPATH=$PYTHONPATH:$(pwd)/src
-        python -c "from telegram_transcriber import main, state_manager, processor, transcriber; print('✅ All modules importable')"
+        python -c "from telegram_transcriber import main, processor, transcriber; print('✅ All modules importable')"
 
     - name: Lint with flake8
       run: |
@@ -40,7 +40,7 @@ jobs:
     - name: Test with pytest
       run: |
         export PYTHONPATH=$PYTHONPATH:$(pwd)/src
-        pytest tests/test_hallucination_filter.py tests/test_isolation_and_softfail.py
+        pytest tests/test_hallucination_filter.py tests/test_knowledge_engine.py tests/test_transcriber.py
       env:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
