@@ -14,7 +14,7 @@ class AIEngine:
         else:
              genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-        self.model = genai.GenerativeModel("gemini-2.0-flash")
+        self.model = genai.GenerativeModel("gemini-2.5-flash")
 
         self.safety_settings = {
             HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
